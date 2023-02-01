@@ -1,0 +1,7 @@
+# Install requirements for repository
+pandas
+numpy
+influxdb-client
+tqdm
+pytz
+scipy

@@ -1,0 +1,31 @@
+import os
+import pandas as pd
+import re
+
+dir1 = r"C:\Users\sfs81547\OneDrive - Science and Technology Facilities Council\Documents\ISIS\Diamon Project\TS2 Measurements\DIAMON_0193200001_all_OUTS"
+dir2 = r"C:\Users\sfs81547\OneDrive - Science and Technology Facilities Council\Documents\ISIS\Diamon Project\TS2 Measurements\DIAMON_0193200002_all_OUTS"
+dir3 = r"C:\Users\sfs81547\OneDrive - Science and Technology Facilities Council\Documents\ISIS\Diamon Project\TS2 Measurements\DIAMON_0193190003_all_OUTS"
+directories = [dir1, dir2, dir3]
+dates = r"C:\Users\sfs81547\Documents\date_diamon.csv"
+
+dates = pd.read_csv(dates, names = ["date", "num"])
+dates["id"] = "DIAMON-0" + dates["num"].astype(str) + "_" + dates["date"].astype(str)
+#filter any repeats
+dates.id = dates.id + "." +(dates.groupby("id").cumcount()+1).astype(str)
+
+dia_1 = dates[dates["num"]==1].id
+dia_2 = dates[dates["num"]==2].id
+dia_3 = dates[dates["num"]==3].id
+dia  = [dia_1, dia_2, dia_3]
+j = 0
+    
+for i, folder in enumerate(os.listdir(dir3)):
+    if not os.path.isdir(os.path.join(dir3, folder)):
+        continue # Not a directory
+        
+    
+    name = os.path.basename(folder)
+    print(name)
+    os.rename(os.path.join(dir3, folder), os.path.join(dir3, dia_3.iloc[i]))
+    print(os.path.basename(folder))
+    j+=1
