@@ -42,7 +42,7 @@ def plot_detector_counts(rate_data, labels):
 
 def plot_dose_rate(df, key=None):
     plt.rcParams["figure.figsize"] = [2,2]
-    ax = df["norm_dose_rate"].plot(kind='bar', yerr=(df["dose_rate_uncert"])/100 * df['norm_dose_rate'], capsize=4, color='purple', figsize=(5,5))
+    ax = df["norm_dose"].plot(kind='bar', yerr=(df["dose_rate_uncert"])/100 * df['norm_dose'], capsize=4, color='purple', figsize=(5,5))
     ax.set_xlabel('Distance from monolith (m)')
     ax.set_ylabel(r"normalised dose rate ( $\frac{\mu Sv}{\mu A})$")
     ax.set_xticklabels(round(df["distance"], 3))

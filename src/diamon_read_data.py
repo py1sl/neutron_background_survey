@@ -21,22 +21,18 @@ def load_pickle(name):
     with open(name, 'rb') as f:
         return pickle.load(f)
 
-def read_diamon_folders(data_path, location_path, shutter_path):
+def read_diamon_folders(data_path, location_path):
     """
     Reads diamon folders, location data and loads in shutter information 
     from idb query
     """
     folder_list = glob.glob(data_path)
-    shutters = load_pickle(shutter_path)
     # ensures location coordinates read in as float not str
     locations = pd.read_csv(location_path,  dtype={'x': float, 'y': float, 'z':float})
     all_data = {}
     # loop over diamon folders reading each set of files and filtering shutters
     for folder in folder_list:
         data = read_folder(folder, locations)
-        #data = da.filter_shutters(data, shutters)
-        #data = da.normalise_dose(data)
-        #data["summary"] = da.convert_to_ds(data)
         all_data[data["name"]] = data
     return all_data
 
@@ -85,7 +81,6 @@ def read_folder(folder, locations):
             break
     if "datetime" in dic.keys():
         dic["out"]["datetime"] = pd.to_timedelta(dic['out']['t(s)'], unit='s') + dic['datetime']['start']
-        #dic["out"]["datetime"] = dic["out"]["datetime"].apply(lambda d: d.replace(tzinfo=timezone.utc))
     else:
         print("Error in diamon folder: " + dic["name"] + " - no counters file - check data")
         exit()

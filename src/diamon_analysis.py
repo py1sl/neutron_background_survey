@@ -15,6 +15,17 @@ def load_pickle(name):
     with open(name, 'rb') as f:
         return pickle.load(f)
 
+def filter_location(data, building, beamline=None):
+    match building:
+        case "TS1":
+            ts1_dict = {key: dic for key, dic in data.items() if (
+                dic["reference"]["Measurement Reference"].iloc[0][0] == '1')} 
+            return ts1_dict
+        case "TS2":
+            ts2_dict = {key: dic for key, dic in data.items() if (
+                dic["reference"]["Measurement Reference"].iloc[0][0] == '2')}
+            return ts2_dict
+
 def beamline_names():
     return ["chipir", "sans2d", "wish", 
                 "inter", "offspec", "let", 
@@ -68,32 +79,26 @@ def convert_to_df(data):
                     if ref[1] == "B":
                         series_list.append(convert_to_ds(measurement))
         beam_df[beamline] = pd.DataFrame(series_list)
+        if not beam_df[beamline].empty:
+            beam_df[beamline] = beam_df[beamline].sort_values("distance")
     return beam_df
 
-def filter_location(data, building, beamline=None):
-    match building:
-        case "TS1":
-            ts1_dict = {key: dic for key, dic in data.items() if (
-                dic["reference"]["Measurement Reference"].iloc[0][0] == '1')} 
-            return ts1_dict
-        case "TS2":
-            ts2_dict = {key: dic for key, dic in data.items() if (
-                dic["reference"]["Measurement Reference"].iloc[0][0] == '2')}
-            return ts2_dict
 
 def convert_to_ds(dic):
-    labels = ("file_name", "start", "end", "reference", "x", "y", "z", "dose_rate", 
+    labels = ("file_name", "start", "end", "reference", "x", "y", "z", "dose_rate", "norm_dose",
               "dose_rate_uncert", "dose_area_product", "dose_area_prod_uncert", "thermal","epi", "fast", "phi", 
               "phi_uncert", "D1", "D2", "D3", "D4", "D5", "D6", "F", "FL", "FR", "R", "RR", "RL", 
               "energy_bins", "flux_bins")
+
     if "high_e" in dic.keys():
         unfold_data = dic["high_e"]
     elif "low_e" in dic.keys():
         unfold_data = dic["low_e"]
+
     data_list = [dic["name"], dic["datetime"]["start"], dic["datetime"]["end"], 
                  dic["reference"]["Measurement Reference"].iloc[0], 
                  dic["reference"]['x'].iloc[0], dic["reference"]['y'].iloc[0], 
-                 dic["reference"]['z'].iloc[0], unfold_data["dose_rate"], 
+                 dic["reference"]['z'].iloc[0], unfold_data["dose_rate"], dic["out"]["norm_dose"].iloc[-1],
                  unfold_data["dose_rate_uncert"], 
                  unfold_data["dose_area_product"], unfold_data["dose_area_product_uncert"], 
                  unfold_data["thermal"], unfold_data["epi"], unfold_data["fast"], 
@@ -103,11 +108,17 @@ def convert_to_ds(dic):
                 unfold_data["count_FL"], unfold_data["count_FR"], unfold_data["count_R"], 
                 unfold_data["count_RR"], unfold_data["count_RL"], 
                 unfold_data["energy_bins"], unfold_data["flux_bins"]]
+
     s1 = pd.Series(data_list, index=labels)
+    s1 = get_distance(s1)
     s1['x'] = float(s1['x'])
     s1['y'] = float(s1['y'])
     s1['z'] = float(s1['z'])
     return s1
+
+def get_distance(data):
+    data['distance'] = np.sqrt(data['x']**2 + data['y']**2)
+    return data
 
 def combine_continuous_data_files(dataframes, cum_time=None):
     combined_dataframe = []
@@ -153,13 +164,8 @@ def peaks_finder(data):
     energy_peaks = energy[(flux_peaks_i)]
     return flux_peaks, energy_peaks
 
-def get_distance(data):
-    col = ['x', 'y', 'z']
-    df = data.loc[data[col].notnull().all(axis=1)]
-    data['distance'] = np.sqrt(df['x']**2 + df['y']**2)
-    return data
-
 def convert_date_to_string(dt):
+
     return str(np.datetime_as_string(dt))
 
 def get_names(data):
@@ -216,7 +222,7 @@ def filter_shutters(data, shutters):
     building, shutter = get_names(data["reference"])
     if shutter != "epb" and building == "ts2":
         sel_shutter = shutters[shutter].set_index(["_time"])
-        data["out"]["shutter_status"] = [get_query_info(sel_shutter, time) for time in data["out"]["datetime"]]
+        data["out"]["shutter-status"] = [get_query_info(sel_shutter, time) for time in data["out"]["datetime"]]
     ts1 = shutters["ts1_current"].set_index(["_time"])
     ts2 = shutters["ts2_current"].set_index(["_time"])
     data["out"]["ts1_current"] = get_current_info(data, ts1)
@@ -224,15 +230,14 @@ def filter_shutters(data, shutters):
     data["out"]["ts1_current"] = data["out"]["ts1_current"].fillna(0)
     data["out"]["ts2_current"] = data["out"]["ts2_current"].fillna(0)
     data = normalise_dose(data)
-    #print(data["out"]["ts2_current"])
     return data
 
 def normalise_dose(data):
     target_station = get_names(data["reference"])[0]
     if target_station == "ts1":
-        data["out"]["norm_dose"] = data["out"]["H*(10)r"] / data["out"]["ts1_current"]
+        data["out"]["norm_dose"] = data["out"]["H*(10)r"].divide(data["out"]["ts1_current"]).replace(np.inf, 0)
     if target_station == "ts2":
-        data["out"]["norm_dose"] = data["out"]["H*(10)r"] / data["out"]["ts2_current"]
+        data["out"]["norm_dose"] = data["out"]["H*(10)r"].divide(data["out"]["ts2_current"]).replace(np.inf, 0)
     return data
 
 def dominant_energy(energy):
