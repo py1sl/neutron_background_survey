@@ -6,7 +6,7 @@ from scipy.signal import find_peaks
 import influx_data_query as idb
 import pickle
 from datetime import timezone
-
+from pathlib import Path
 def save_pickle(data, name):
     with open(name, 'wb') as f:
         pickle.dump(data, f)
@@ -14,6 +14,19 @@ def save_pickle(data, name):
 def load_pickle(name):
     with open(name, 'rb') as f:
         return pickle.load(f)
+
+def select_location(building):
+    match building:
+        case "ts1":
+            return str(Path(__file__).parent / "../data/ts2_measurements/DIAMON*")
+        case "ts2":
+            return str(Path(__file__).parent / "../data/ts2_measurements/DIAMON*")
+        case "all":
+            return Path(__file__).parent / "../data/ts2_measurements/DIAMON*"
+        case _:
+            print("enter a valid location")
+            loc = input("Enter a measurement location: 'ts1', 'ts2', 'all': ")
+            select_location(loc)
 
 def filter_location(data, building, beamline=None):
     match building:
