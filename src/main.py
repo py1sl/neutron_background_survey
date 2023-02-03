@@ -1,8 +1,8 @@
 import diamon_read_data as dia
 import diamon_analysis as da
 
-ts2_path = r"C:\Users\sfs81547\OneDrive - Science and Technology Facilities Council\Documents\ISIS\Diamon Project\TS2 Measurements\DIAMON*"
-location_path = r"C:\Users\sfs81547\OneDrive - Science and Technology Facilities Council\Documents\ISIS\Diamon Project\Code\data\Measurement_location.csv"
+ts2_path = "data/ts2_measurements/DIAMON*"
+location_path = "data/measurement_location.csv"
 fname = "shutters_pickle.pkl"
 
 def main():
