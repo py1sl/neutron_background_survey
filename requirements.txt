@@ -1,7 +1,11 @@
-# Install requirements for repository
-pandas
-numpy
-influxdb-client
-tqdm
-pytz
-scipy
+dask==2022.12.0
+influx_data_utils==0.0.5
+influxdb_client==1.35.0
+matplotlib==3.6.3
+memory_profiler==0.61.0
+numpy==1.23.4
+pandas==1.5.1
+ply==3.11
+plyfile==0.7.4
+pytz==2022.6
+scipy==1.10.0
