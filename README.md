@@ -1,4 +1,5 @@
-# neutron_background_survey
+# NEUTRON BACKGROUND SURVEY
+- This is the main project work for my industrial placement
 
 A background neutron survey was performed in the experimental halls of ISIS and focused along the neutron beamlines of several instruments. 
 The survey was used to map out the relative background levels and to compare neutron energy distributions across the facility.
