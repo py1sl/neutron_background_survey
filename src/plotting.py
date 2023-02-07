@@ -110,3 +110,83 @@ def plot_dose_distance(df, key=None):
     plt.show()
 def create_meshgrid(x,y):
     return np.meshgrid(x,y)
+
+def find_change_time(data):
+    df = data["out"]["shutter-open"]
+    filter = (df.ne(df.shift()))
+    change_times = data["out"][filter]
+    return change_times
+
+def plot_dose_time(data):
+
+    #get starting status then record change in difference
+    #todo: generalise for all measurements?
+    change_times = find_change_time(data)
+    x = data['out']['t(s)']
+    y = data['out']['norm_dose']
+    y2 = data['out']['ts2_current']
+    fig = plt.figure(figsize=(8,8))
+
+    ax = fig.add_subplot(111)
+    ax2 = fig.add_subplot(111, frame_on=False)
+    ax.plot(x, y, color='b', marker=None)
+    ax.set_xlabel("time (s)")
+    ax.set_ylabel(r" normalised dose rate ( $\frac{\mu Sv}{\mu A -hour})$", color='b')
+    colors = ['black', 'orange', 'green']
+    for time, status in zip(change_times["t(s)"], change_times["shutter-open"]):
+        if status:
+            color = colors[2]
+            label = "open"
+        else:
+            color = colors[0]
+            label= "closed"
+        plt.vlines(time, 0, max(y2), ls='dashdot', color=color, label=label)
+    ax2.plot(x, y2, color='r', marker=None, alpha=0.5)
+    ax2.yaxis.tick_right()
+    ax2.set_ylabel('current $\mu$ A', color='r') 
+    ax2.yaxis.set_label_position('right')
+    plt.legend(loc="lower right")
+    name = da.get_names(data["reference"])[1]
+    distance = da.get_distance(data["reference"])["distance"].values[0]
+    plt.title("Comparison between dose rate and current with the shutter status at " + name + "\n at a distance : {:.2f} m away".format(distance))
+    
+def plot_energy_time(data, key, beamline):
+    distance = da.get_distance(data["reference"])["distance"].values[0]
+    fast = data["out"]["Fast%"].astype(float)
+    epi = data["out"]["Epit%"].astype(float)
+    therm = data["out"]["Ther%"].astype(float)
+    times = data["out"]["t(s)"]
+    ts2_current = data["out"]["ts2_current"]
+    
+    fig = plt.figure(figsize=(6,6))
+    ax = fig.add_subplot(111)
+    ax.plot(times, fast, color='g', label='fast', marker=None)
+    ax.plot(times, epi, color='orange', label='epithermal', marker=None)
+    ax.plot(times, therm, color='r', label='thermal', marker=None)
+    colors = ['black', 'orange', 'green']
+    ax2 = fig.add_subplot(111, frame_on=False)
+    if beamline != "epb":
+        change_times = find_change_time(data)
+        for time, status in zip(change_times["t(s)"], change_times["shutter-open"]):
+            if status:
+                color = colors[2]
+                label = "open"
+            else:
+                color = colors[0]
+                label= "closed"
+            ax2.vlines(time, 0, np.max(ts2_current), ls='dashdot', color=color, label=label)
+    
+    ax.set_yticks(np.arange(0, 110, 10))
+    ax2.plot(times, ts2_current, color='r', marker=None, alpha=0.5)
+    ax2.yaxis.tick_right()
+    ax2.set_ylabel('current $\mu$ A', color='r') 
+    ax2.yaxis.set_label_position('right')
+    name = da.get_names(data["reference"])[1]
+    ax.set_xlabel("Time t(s)")
+    
+    ax.set_ylabel("percentage (%)")
+    ax.legend(loc="upper right")
+    ax2.legend(loc="upper center")
+    plt.title("Fast, thermal and epithermal energy distribution over time for " + name + "\n at a distance : {:.2f} m away".format(distance))
+    plt.show()
+    
