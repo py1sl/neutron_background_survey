@@ -2,7 +2,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import argparse
-from scipy.signal import find_peaks
+#issue with scipy - cant import lib?
+#from scipy.signal import find_peaks
 import influx_data_query as idb
 import pickle
 from datetime import timezone
@@ -35,6 +36,8 @@ def beamline_names():
 def convert_to_df(data):
     """Filter out any low energy recordings for high energy unfold data
     returns a dataframe
+    
+    STEVE - filter using enum 
     """
     beam_df = {}
     for beamline in beamline_names():
@@ -114,6 +117,18 @@ def convert_to_ds(dic):
     s1['x'] = float(s1['x'])
     s1['y'] = float(s1['y'])
     s1['z'] = float(s1['z'])
+    return s1
+
+def convert_status_to_ds(dic):
+    labels = ("file_name", "start", "end", "reference", "x", "y", "z")
+
+    data_list = [dic["name"], dic["datetime"]["start"],  dic["datetime"]["end"],
+                 dic["reference"]["Measurement Reference"].iloc[0],
+                 dic["reference"]['x'].iloc[0], dic["reference"]['y'].iloc[0],
+                 dic["reference"]['z'].iloc[0]]
+
+    s1 = pd.Series(data_list, index=labels)
+    s1 = get_distance(s1)
     return s1
 
 def get_distance(data):
@@ -201,7 +216,13 @@ def get_names(data):
         return ["ts1", "null"]
 
 def get_query_info(data, time):
-    return data[data.index < time].tail(1)["_value"].values[0]
+    status =data[data.index < time].tail(1)["_value"].values[0]
+    if status == 1:
+        return False
+    if status == 2:
+        return True
+    if status == 3:
+        return False
 
 def get_current_info(data, shutter):
     times = data["out"]["datetime"]
@@ -222,7 +243,7 @@ def filter_shutters(data, shutters):
     building, shutter = get_names(data["reference"])
     if shutter != "epb" and building == "ts2":
         sel_shutter = shutters[shutter].set_index(["_time"])
-        data["out"]["shutter-status"] = [get_query_info(sel_shutter, time) for time in data["out"]["datetime"]]
+        data["out"]["shutter-open"] = [get_query_info(sel_shutter, time) for time in data["out"]["datetime"]]
     ts1 = shutters["ts1_current"].set_index(["_time"])
     ts2 = shutters["ts2_current"].set_index(["_time"])
     data["out"]["ts1_current"] = get_current_info(data, ts1)
@@ -263,6 +284,39 @@ def find_spect_peaks(data):
         energy_list.append(energy)
         flux_list.append(flux)
     return energy_list, flux_list
+
+def filter_shutter_status(data, flag):
+    filtered_df = []
+    for result in data.values():
+        if "shutter-open" in result["out"].keys():
+            filtered_df = filtered_df + (last_row_shutter_change(result))
+    df = pd.DataFrame(filtered_df)
+    return flag_shutter(df, flag)
+
+def last_row_shutter_change(result):
+    """_summary_
+
+    Args:
+        result (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
+    data = result["out"]
+    data = data[result["out"]["t(s)"] > 1000]
+
+    df = data["shutter-open"]
+    #get boolean for index of row where change in status and always get last value in df
+    filter = (df.ne(df.shift(-1)))
+    last = df.tail(1)
+    change_times = data[(filter) | (last)]
+    filtered_list  = []
+    for _, row in change_times.iterrows():
+        dseries = convert_status_to_ds(result)
+        filtered_list.append(pd.concat([dseries, row]).drop("INTERNAL"))
+    return filtered_list
+def flag_shutter(data, flag=False):
+        return data[data["shutter-open"] == flag]
 """
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Diamon Analysis")
