@@ -14,12 +14,6 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from memory_profiler import profile
 import influx_data_query as idb
-import dask.dataframe as dd
-
-def load_pickle(name):
-    "unpickles a file and loads into the script"
-    with open(name, 'rb') as f:
-        return pickle.load(f)
 
 def read_diamon_folders(data_path, location_path):
     """
