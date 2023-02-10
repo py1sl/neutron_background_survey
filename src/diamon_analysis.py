@@ -47,60 +47,32 @@ def ts2_beamline_names():
                 "inter", "offspec", "let", 
                 "nimrod", "polref", "zoom", "larmor", 
                 "imat", "epb"]
-
+def names():
+    """
+    returns a list of beamline names in ts2
+    """
+    return ["C", "S", "W", 
+                "In", "O", "Le", 
+                "N", "P", "Z", "L", 
+                "I", "B"]
 def convert_to_df(data):
-    """Filter out any low energy recordings for high energy unfold data
-    returns a dataframe
+    """
+    returns a dictionary of dataframes with keys for each
+    instrument beamline. if on epb = epb
     
-    STEVE - filter using enum 
     """
     beam_df = {}
-    for beamline in ts2_beamline_names():
+    beamline_names = names()
+    for i, name in enumerate(beamline_names):
         series_list = []
         for measurement in data.values():
             ref = measurement["reference"]["Measurement Reference"].iloc[0]
-            match beamline:
-                case "chipir":
-                    if ref[1] == "C":
-                        series_list.append(convert_to_ds(measurement))
-                case "imat":
-                    if ref[1] == "I":
-                        series_list.append(convert_to_ds(measurement))
-                case "inter":
-                    if ref[1:3] == "In":
-                        series_list.append(convert_to_ds(measurement))
-                case "larmor":
-                    if ref[1] == "L":
-                        series_list.append(convert_to_ds(measurement))
-                case "let":
-                    if ref[1:3] == "le":
-                        series_list.append(convert_to_ds(measurement))
-                case "nimrod":
-                    if ref[1] == "N":
-                        series_list.append(convert_to_ds(measurement))
-                case "offspec":
-                    if ref[1] == "O":
-                        series_list.append(convert_to_ds(measurement))
-                case "polref":
-                    if ref[1] == "P":
-                        series_list.append(convert_to_ds(measurement))
-                case "sans2d":
-                    if ref[1] == "S":
-                        series_list.append(convert_to_ds(measurement))
-                case "wish":
-                    if ref[1] == "W":
-                        series_list.append(convert_to_ds(measurement))
-                case "zoom":
-                    if ref[1] == "Z":
-                        series_list.append(convert_to_ds(measurement))
-                case "epb":
-                    if ref[1] == "B":
-                        series_list.append(convert_to_ds(measurement))
-        beam_df[beamline] = pd.DataFrame(series_list)
-        if not beam_df[beamline].empty:
-            beam_df[beamline] = beam_df[beamline].sort_values("distance")
+            if ref[1] == beamline_names[i] or ref[1:3] == beamline_names[i]:
+                series_list.append(convert_to_ds(measurement))
+        beam_df[name] = pd.DataFrame(series_list)
+        if not beam_df[name].empty:
+            beam_df[name] = beam_df[name].sort_values("distance")
     return beam_df
-
 
 def convert_to_ds(dic):
     """
@@ -431,18 +403,16 @@ def find_significant(energy, energy_type):
     if max(energy, key=energy.get) == energy_type and max(energy.values()) > 0.5:
         return energy
 
-def find_abs_error(dataframe):
+def find_abs_error(dataframe, un_col_name, col_name):
     """
-    convert % error to absolute error on value
+    convert % error to absolute error on selected column names
     Args:
         dataframe (pandas df)
 
     Returns:
         df: abs error included in df out
     """
-    for i, col in enumerate(dataframe.columns):
-        if 'un%' in col:
-            dataframe["abs_err " + dataframe.columns[i-1]] = dataframe[dataframe.columns[i-1]] * (dataframe[col]/100)
+    dataframe["abs_error"] = dataframe[col_name] * (dataframe[un_col_name] / 100)
     return dataframe
 
 #old function
@@ -472,6 +442,10 @@ def filter_shutter_status(data, flag):
         #remove epb measurements with no shutter status
         if "shutter-open" in result["out"].keys():
             filtered_df = filtered_df + (last_row_shutter_change(result))
+        elif "epb" == get_names(result["reference"])[1]:
+            out = result["out"].iloc[-1]
+            dseries = (convert_status_to_ds(result))
+            filtered_df.append(pd.concat([dseries, out]).drop("INTERNAL"))
     df = pd.DataFrame(filtered_df)
     return flag_shutter(df, flag)
 
@@ -502,11 +476,26 @@ def flag_shutter(data, flag=False):
     """
     boolean mask of data to get data matching selected flag. flag is true/false for open/closed
     """
-    return data[data["shutter-open"] == flag]
-"""
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Diamon Analysis")
-    parser.add_argument('file_name', type=argparse.FileType('r'), help="Enter the filename")
-    args = parser.parse_args()
-    dia.read_folder(args.file_name)"""
-    
+    return data[(data["shutter-open"] == flag) | (data["shutter-open"].isna())]
+
+def average_repeated_data(df):
+    """
+    When measurement has multiple data for same date and location take average of data
+    Args:
+        df (dataframe): key information for data in df
+    returns: filtered df with averages taken for repeats
+    """
+    return df.groupby("file_name").mean(numeric_only=True).reset_index().drop(columns=["t(s)"])
+
+def filter_low_beam_current(data, minimum_current):
+    """
+    This function removes any data in out iles where beam current less than the argument minimum current
+    Args:
+        data (dict): dict of all data information
+        minimum_current (float): minimum current to include
+
+    Returns:
+        dict: same data with data at a time with current < minimum removed
+    """
+    data["out"] = data["out"][data["out"]["ts2_current"] > minimum_current]
+    return data
