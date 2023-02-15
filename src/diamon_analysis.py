@@ -497,7 +497,9 @@ def average_repeated_data(df):
         df (dataframe): key information for data in df
     returns: filtered df with averages taken for repeats
     """
-    return df.groupby("file_name").mean(numeric_only=True).reset_index().drop(columns=["t(s)"])
+    keep = df[["shutter-open", "reference"]]
+    filtered_df = df.groupby("file_name").mean(numeric_only=True).reset_index().drop(columns=["t(s)"])
+    return pd.concat([filtered_df, keep], axis=1)
 
 def filter_low_beam_current(data, minimum_current):
     """
@@ -511,3 +513,7 @@ def filter_low_beam_current(data, minimum_current):
     """
     data["out"] = data["out"][data["out"]["ts2_current"] > minimum_current]
     return data
+
+#Todo - add comparison between repeats of data (same x,y,z)
+def compare_repeats(data1, data2):
+    return

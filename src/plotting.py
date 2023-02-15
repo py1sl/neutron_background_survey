@@ -1,20 +1,20 @@
 import matplotlib.pyplot as plt
+from matplotlib import colors
 import numpy as np
 import diamon_analysis as da
+from scipy import interpolate
+#This script plots all data
 
-def plot_spect(data):
-    energy, flux = da.extract_spectrum(data)
-    plt.xscale("log")
-    plt.step(energy, flux, label=data.name)
-    plt.xlabel("Energy (MeV)")
-    plt.ylabel("Flux (cm$^{-2}$ s$^{-1}$)")
-    plt.legend()
-    plt.savefig("plots/single_energy_spectrum.png")
-    plt.show()
+
     
 def plot_combined_spect(data_array, key=None):
-    
-    for index, data in data_array.iterrows():
+    """Plot of spectrum - flux vs energy for a measurement.
+    split across thermal, epithermal and fast neutrons
+
+    Args:
+        data (df): df of data
+    """
+    for _, data in data_array.iterrows():
 
         energy, flux = da.extract_spectrum(data)
         plt.xscale("log")
@@ -133,8 +133,11 @@ def plot_dose_time(data):
     ax.set_xlabel("time (s)")
     ax.set_ylabel(r" normalised dose rate ( $\frac{\mu Sv}{\mu A -hour})$", color='b')
     colors = ['black', 'orange', 'green']
+
+    #plt.axvspan(time, change_times["t(s)"][i+1])
+
     for time, status in zip(change_times["t(s)"], change_times["shutter-open"]):
-        if status:
+        if status is True:
             color = colors[2]
             label = "open"
         else:
@@ -181,6 +184,7 @@ def plot_energy_time(data, key, beamline):
     ax2.yaxis.tick_right()
     ax2.set_ylabel('current $\mu$ A', color='r') 
     ax2.yaxis.set_label_position('right')
+    ax2.set_ylim(0, 40)
     name = da.get_names(data["reference"])[1]
     ax.set_xlabel("Time t(s)")
     
@@ -189,4 +193,122 @@ def plot_energy_time(data, key, beamline):
     ax2.legend(loc="upper center")
     plt.title("Fast, thermal and epithermal energy distribution over time for " + name + "\n at a distance : {:.2f} m away".format(distance))
     plt.show()
+
+def plot_dose_map(data):
+    x = data['x']
+    y = data['y']
+    values = data["norm_dose"]
+    fig = plt.figure(figsize=(12,12))
+    ax = fig.add_subplot(211)
+    scat = ax.scatter(x, y , c=values, s=4, norm=colors.LogNorm(), cmap='jet')
+    if data["shutter-open"].any() is True:
+        status = "open"
+    else:
+        status = "closed"
+    ax.set_title("Heat map of dose information when beamline shutter  was " + status + " for the instrument the monitor was placed" )
+    ax.set_xlim(-40, 40)
+    ax.set_ylim(-40, 40)
+    plt.colorbar(scat)
+
+def convert_float(data):
+    return np.array(data.astype(float))
+def plot_energy_map(data):
+    x = data['x']
+    y = data['y']
+    ther = convert_float(data['Ther%'])
+    epi = convert_float(data['Epit%'])
+    fast = convert_float(data['Fast%'])
+    values = {"thermal": ther, "epithermal":epi, "fast": fast}
+    fig, ax = plt.subplots(1, 3, figsize = (22,7))
+    for i, (key, value) in enumerate(values.items()):
+        
+        #scat = ax[i].plot(x,y)
+        scat = ax[i].scatter(x, y , c=value, s=4, cmap='jet')
+        if data["shutter-open"].all():
+            status = "open"
+        else:
+            status = "closed"
+        ax[i].set_title("Percentage of " + key +" neutrons with the beamline shutter " + status)
+        plt.colorbar(scat)
+def func(x, y):
+
+    return x*(1-x)*np.cos(4*np.pi*x) * np.sin(4*np.pi*y**2)**2
+def heat_plot(points, values):
     
+
+    grid_x, grid_y = np.mgrid[points[:,0].min():points[:,0].max(), points[:,1].min():points[:,1].max()]
+
+    grid_z0 = interpolate.griddata(points, values, (grid_x, grid_y), method='linerar')
+
+    plt.figure(figsize=(12,12))
+    plt.imshow(grid_z0, cmap='jet', extent=(-40,40,-40,40))
+
+    plt.title('Nearest')
+    
+def contour_plot(x,y,z, label, norm=None):
+
+    # target grid to interpolate to
+    xi = np.arange(-45, 45, 0.05)
+    yi  = np.arange(-60,60, 0.05)
+    xi,yi = np.meshgrid(xi,yi)
+
+    # set mask
+
+    # interpolate
+    zi = interpolate.griddata((x,y),z,(xi,yi),method='linear', rescale=True)
+    # plot
+    fig = plt.figure(figsize=(25,15))
+    ax = fig.add_subplot(221)
+    scat = ax.contourf(xi,yi,zi, levels=50, cmap='jet')
+    ax.plot(x,y,'k.')
+    ax.grid(alpha=0.4, color='black')
+    plt.xlabel('x (m)',fontsize=16)
+    plt.ylabel('y (m)',fontsize=16)
+    plt.title("distribution of " + label + " neutrons")
+    plt.colorbar(scat)
+    plt.show()
+
+def interpolate_data(x,y,z, aspect=1, cmap='jet'):
+    xi, yi = np.linspace(x.min(), x.max(), 100), np.linspace(y.min(), y.max(), 100)
+    xi, yi = np.meshgrid(xi, yi)
+
+    # Interpolate missing data
+    rbf = interpolate.Rbf(x, y, z, function='cubic')
+    zi = rbf(xi, yi)
+
+    _, ax = plt.subplots(figsize=(6, 6))
+
+    hm = ax.imshow(zi, interpolation='nearest', cmap=cmap,
+                    extent=[x.min(), x.max(), y.max(), y.min()]) 
+    ax.scatter(x, y, marker='x', color='black')
+    ax.set_aspect(aspect)
+    return hm
+def normalize(data, min, max):
+    data = data.astype(np.float)
+    return (data - min) / (max - min)
+
+def test(x,y, z):
+    nx = 200
+    ny = 200
+    xmin = x.min()
+    xmax = x.max()
+    ymin = y.min()
+    ymax = y.max()
+    xi = np.linspace(xmin, xmax, nx)
+    yi = np.linspace(ymin, ymax, ny)
+    xi, yi = np.meshgrid(xi, yi)
+
+    # Interpolate using delaunay triangularization 
+    x_new, xi_new = normalize(x, xmin, xmax), normalize(xi, xmin, xmax)
+    y_new, yi_new = normalize(y, ymin, ymax), normalize(yi, ymin, ymax)
+
+    # Interpolate using delaunay triangularization 
+    zi = interpolate.griddata((x_new, y_new), z, (xi_new, yi_new), method='cubic')
+
+    # Plot the results
+    plt.figure()
+    scat = plt.pcolormesh(xi,yi,zi)
+    plt.scatter(x,y, c=z)
+    plt.colorbar(scat)
+    plt.axis([xmin, xmax, ymin, ymax])
+    plt.show()
