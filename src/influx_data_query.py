@@ -15,8 +15,11 @@ warnings.simplefilter('ignore', MissingPivotFunction)
 
 class query_object:
 
-    def __init__(self, channel_name, start, end):
-        self.channel_name = channel_name
+    def __init__(self, start, end, names=None):
+        if channel_names is None:
+            self.names = channel_names()
+        else:
+            self.names = names
         self.utc = pytz.timezone("UTC")
         self.bst = pytz.timezone("Europe/London")
         self.start = self.date_to_str(start)
@@ -25,11 +28,13 @@ class query_object:
         self.cycles = {"22_03": [datetime.date(2022,9,13), 
                                  datetime.date(2020,10,14)], 
                        "22_04": [datetime.date(2022,11,8), 
-                                 datetime.date(2022,12,16)]
+                                 datetime.date(2022,12,16)],
+                       "22_05": [datetime.date(2022,2,7),
+                                 datetime.date(2022,3,31)]
                        }
 
     def __str__(self):
-        return self.channel_name
+        return self.names
 
     def date_to_str(self, datetime_obj):
         localiser = DatetimeLocaliser(self.bst, self.utc)
@@ -42,8 +47,8 @@ class query_object:
         return date
 
     @staticmethod
-    def get_data(names, start, end):
-        query = query_object(names, start, end)
+    def get_data(start, end, names):
+        query = query_object(start, end, names)
         query.data = query.influx_query(names, query.start, query.end)
         return query
 

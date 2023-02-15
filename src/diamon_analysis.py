@@ -3,7 +3,7 @@ import pandas as pd
 #issue with scipy - cant import lib?
 from scipy.signal import find_peaks
 import pickle
-
+import influx_data_query as idb
 def save_pickle(data, name):
     """
     Saves pickled data to file. (less memory)
@@ -17,6 +17,18 @@ def load_pickle(name):
     """
     with open(name, 'rb') as f:
         return pickle.load(f)
+
+def influx_db_query(dates, names=None):
+    """"
+    load influx database between selected dates and option include specific channel names
+    args:
+        dates (list of datetime)
+        names (optiponal): str list of channel names to query if none select all beamline and current info
+    """
+    start = dates[0]
+    end = dates[1]
+    query_data = idb.query_object.get_data(start, end, names)
+    return query_data
 
 def filter_location(data, building):
     """
@@ -485,7 +497,9 @@ def average_repeated_data(df):
         df (dataframe): key information for data in df
     returns: filtered df with averages taken for repeats
     """
-    return df.groupby("file_name").mean(numeric_only=True).reset_index().drop(columns=["t(s)"])
+    keep = df[["shutter-open", "reference"]]
+    filtered_df = df.groupby("file_name").mean(numeric_only=True).reset_index().drop(columns=["t(s)"])
+    return pd.concat([filtered_df, keep], axis=1)
 
 def filter_low_beam_current(data, minimum_current):
     """
@@ -499,3 +513,7 @@ def filter_low_beam_current(data, minimum_current):
     """
     data["out"] = data["out"][data["out"]["ts2_current"] > minimum_current]
     return data
+
+#Todo - add comparison between repeats of data (same x,y,z)
+def compare_repeats(data1, data2):
+    return
