@@ -2,8 +2,8 @@
 import datetime
 import json
 import warnings
-import re
-import matplotlib.pyplot as plt
+import numpy as np
+from collections import namedtuple as nt
 import pytz
 from influx_data_utils.process_influx_data.datetime_localiser import \
     DatetimeLocaliser
@@ -15,22 +15,26 @@ warnings.simplefilter('ignore', MissingPivotFunction)
 
 class query_object:
 
-    def __init__(self, start, end, names=None):
-        if channel_names is None:
-            self.names = channel_names()
-        else:
-            self.names = names
+    def __init__(self, names=None, current_data=False):
+        if names is not None:
+            self.names = names.values
+            if current_data is True:
+                self.names = np.append(self.names, ["local::beam:target", "local::beam:target2"])
         self.utc = pytz.timezone("UTC")
         self.bst = pytz.timezone("Europe/London")
-        self.start = self.date_to_str(start)
-        self.end = self.date_to_str(end)
+        self.start = None
+        self.end = None
         self.data = {}
         self.cycles = {"22_03": [datetime.date(2022,9,13), 
                                  datetime.date(2020,10,14)], 
                        "22_04": [datetime.date(2022,11,8), 
                                  datetime.date(2022,12,16)],
-                       "22_05": [datetime.date(2022,2,7),
-                                 datetime.date(2022,3,31)]
+                       "22_05": [datetime.date(2023,2,7),
+                                 datetime.date(2023,3,31)],
+                       "23_01": [datetime.date(2023,4, 25), 
+                                 datetime.date(2023,5,26)],
+                       "23_02": [datetime.date(2023,6,27),
+                                 datetime.date(2023,8,4)]
                        }
 
     def __str__(self):
@@ -47,9 +51,11 @@ class query_object:
         return date
 
     @staticmethod
-    def get_data(start, end, names):
-        query = query_object(start, end, names)
-        query.data = query.influx_query(names, query.start, query.end)
+    def get_data(start, end):
+        query = query_object()
+        query.start = query.date_to_str(start)
+        query.end = query.date_to_str(end)
+        query.data = query.influx_query()
         return query
 
     def last_query(self, channel, start_str, end_str):
@@ -63,12 +69,15 @@ class query_object:
             new_start_time = self.date_to_str(prev_week)
             df = self.last_query(channel, new_start_time, start_str)
         else:
-            df = df.drop(['result','table'], axis=1)
+            df = df.drop(['result','table'], axis=1).set_index("_time")
             return df
 
-    def influx_query(self, channels, start_str, end_str):
+    def influx_query(self, channel_names=None):
+        channels = self.names
+        start_str = self.start
+        end_str = self.end
         client_query_api, influx_querier = self.load_client_api()
-        shutters_data = {}
+        idb_data = {}
         for channel in channels:
             df = InfluxQuerier.query_influx(
                 client_query_api, channel_name=channel, 
@@ -82,23 +91,31 @@ class query_object:
                 new_start_time = self.date_to_str(prev_week)
                 df = self.last_query(channel, new_start_time, start_str)
             else:
-                df = df.drop(['result','table'], axis=1)
-            name = re.search("(?<=::)(.*?)(?=:)", channel).group()
-            if name == 'e1':
-                name = 'zoom'
-            elif name == 'e6':
-                name = 'larmor'
-            elif name == 'w5':
-                name = 'imat'
-            if channel == "local::beam:target2":
-                name = "ts2_current"
-            elif channel == "local::beam:target":
-                name = "ts1_current"
-            shutters_data[name] = df
-        return shutters_data
+                df = df.drop(['result','table'], axis=1).set_index("_time")
+                
+            if channel_names is not None:
+                name = channel_names[channel_names == channel].index[0][1]
+            idb_data[name] = df
+        return idb_data
+
+    def query_db(self):
+        channel = self.name
+        start = self.start
+        end = self.start
+        client_query_api, influx_querier = self.load_client_api()
+        df = InfluxQuerier.query_influx(client_query_api, channel_name=channel, 
+                                        start_time=start, end_time=end)
+        if df.empty:
+            end = self.str_to_date(start)
+            prev_week = (end - datetime.timedelta(days=1))
+            start = self.date_to_str(prev_week)
+            df = self.last_query(channel, start, end)
+        else:
+            df = df.drop(['result','table'], axis=1)
+        return df
 
     def load_client_api(self):
-        with open("influx.auth", 'r') as f: # create a json file with an "AUTH_TOKEN" key
+        with open("src\\influx.auth", 'r') as f: # create a json file with an "AUTH_TOKEN" key
             auth_file = json.load(f)
         auth_token = auth_file["AUTH_TOKEN"]
         client = InfluxDBClient(url="https://infra.isis.rl.ac.uk:8086", token=auth_token, org="4298498d740c3795")
@@ -109,20 +126,6 @@ class query_object:
     def get_shutter_status(self, time):
         return
 
-def channel_names():
-
-    channels = ["t2shut::chipir:status", "t2shut::sans2d:status", "t2shut::wish:status", 
-                "t2shut::inter:status", "t2shut::offspec:status", "t2shut::let:status", 
-                "t2shut::nimrod:status", "t2shut::polref:status", "t2shut::e1:status", "t2shut::e6:status", 
-                "t2shut::w5:status", "local::beam:target", "local::beam:target2"]
-    return channels
-"""
-start = [2022,11, 8,0, 0,0]
-end = [2022, 12, 16, 23, 59, 59]
-names = channel_names()
-data = query_object.get_data(names, start, end)
-print(data)
-"""
 def date_to_str( datetime_obj):
     utc = pytz.timezone("UTC")
     bst = pytz.timezone("Europe/London")

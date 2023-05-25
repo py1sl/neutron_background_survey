@@ -3,10 +3,11 @@ import pandas as pd
 from datetime import datetime, timedelta, timezone
 import glob
 import pytz
-import diamon_analysis as da
-import neutronics_analysis as na
-import shutter_analysis as sa
+import src.diamon_analysis as da
+import src.neutronics_analysis as na
+import src.shutter_analysis as sa
 import re
+import os.path
 
 class diamon:
     def __init__(self, summary_out_selected: bool):
@@ -132,14 +133,25 @@ class diamon:
 
     def get_shutter_info(self, shutter):
         beamlines = da.get_east_west_names(self)
-        
-    def filter_shutters(self, shutter_df):
-        i = 0
-        print("starting filter")
-        for time in self.out_data["datetime"]:
-            self.shutters.append(shutter_df.query("datetime < @time").groupby(shutter_df.index.names[0]).tail(1))
-            #self.current_data.append(current_df.query("datetime < @time").groupby(current_df.index.names[0]).tail(1))
-            i +=1
+    def filter_current(self, current_df, times, i):
+        time = times[i]
+        #first measurement take last data 20s before
+        if i ==0:
+            start = times[i] - np.timedelta64(20, 's')
+        else:
+            #take start as value before
+            start = times[i-1]
+        filtered_current = current_df.loc[pd.IndexSlice[:, start:time], :]["_value"]
+        return np.mean(filtered_current)
+    def shutter_filter(self, shutter_df, current_df):
+        values = []
+        current_values = []
+        times = np.array(self.out_data["datetime"])
+        for i, time in enumerate(times):
+            shutter_df 
+            values.append(shutter_df.loc[pd.IndexSlice[:, :time], :].groupby(shutter_df.index.names[0]).tail(1).droplevel("datetime"))
+            current_values.append(self.filter_current(current_df, times, i))
+        return values
 
 def load_diamon(loc_data, fname, shutter_data):
     """data from diamon instrument loaded from files. data matched with measurement coordinate
@@ -156,6 +168,7 @@ def load_diamon(loc_data, fname, shutter_data):
     for folder in glob.glob(fname):
         diamon_obj = diamon(False)
         diamon_obj.read_folder(folder)
+        diamon_obj.folder_name = os.path.basename(folder)
         #print(diamon_obj.out_data)
         diamon_list.append(diamon_obj)
         series_list.append(diamon_obj.id)
@@ -167,6 +180,7 @@ def load_diamon(loc_data, fname, shutter_data):
     for data in diamon_list:
         data = match_location(loc_data, data, id)
         data.beamlines = da.get_east_west_names(data.reference)
+        data.beamline = da.get_names(data.reference["Measurement Reference"].iloc[0])[1]
         #data.filter_shutters(shutter_df, current_df)
         #shutter_info = [sa.filter_shutters([shutter_df, current_df], data.start_time, time, [shutter_df.index.names[0], current_df.index.names[0]]) for time in data.out_data["datetime"]]
     return diamon_list
