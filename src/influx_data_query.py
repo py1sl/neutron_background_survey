@@ -65,25 +65,30 @@ class query_object:
         if df.empty:
             #case returns empty - no update since start
             start_time = self.str_to_date(start_str)
-            prev_week = (start_time - datetime.timedelta(days=1))
+            prev_week = (start_time - datetime.timedelta(weeks=1))
             new_start_time = self.date_to_str(prev_week)
-            df = self.last_query(channel, new_start_time, start_str)
+            return self.last_query(channel, new_start_time, start_str)
         else:
             df = df.drop(['result','table'], axis=1).set_index("_time")
             return df
 
-    def influx_query(self, channel_names=None):
+    def influx_query(self, channel_names):
         channels = self.names
         start_str = self.start
         end_str = self.end
+        
         client_query_api, influx_querier = self.load_client_api()
         idb_data = {}
         for channel in channels:
+            if channel == "t2shut::inter:status":
+                print("yes")
+            print(channel  + " read in  at " + str(start_str) + "\n")
             df = InfluxQuerier.query_influx(
                 client_query_api, channel_name=channel, 
                 start_time=start_str,
                 end_time=end_str
             )
+
             if df.empty:
                 #case returns empty - no update since start
                 start_time = self.str_to_date(start_str)
@@ -93,8 +98,13 @@ class query_object:
             else:
                 df = df.drop(['result','table'], axis=1).set_index("_time")
                 
-            if channel_names is not None:
+            if channel == "local::beam:target":
+                name = "ts1_current"
+            elif channel == "local::beam:target2":
+                name = "ts2_current"
+            else:
                 name = channel_names[channel_names == channel].index[0][1]
+           
             idb_data[name] = df
         return idb_data
 
