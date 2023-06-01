@@ -1,0 +1,2 @@
+[#]	Model	(c)	t(s)	H*(10)r	Hr_un%	H*(10)i	Hi_un%	h*(10)	h_un%	PHI	phi_un%	D_UNC	Ther%	Epit%	Fast%	INTERNAL	
+0	H	(3)	2081.90	0.020	51.1%	0.012	51.1%	99.9	13.2%	0.056	49.3%	45.44%	72.6%	0.2%	27.2%	[1-0.91 0]
