@@ -18,31 +18,26 @@ def load_pickle(name):
     """
     load pickled data from file into program
     """
-    with open(name, 'rb') as f:
-        return pickle.load(f)
-
+    try:
+        with open(name, 'rb') as f:
+            return pickle.load(f)
+    except IOError:
+        print("no file exists")
+        return None
 def influx_db_query(dates, names=None):
     """"
     load influx database between selected dates and option include specific channel names
     args:
         dates (list of datetime as STR)
-        names (optiponal): str list of channel names to query if none select all beamline and current info
+        names (optiponal): df of beam info and channel names
     """
-    query_obj = idb.query_object()
+    query_obj = idb.query_object(names, True)
     query_obj.start = dates[0]
     query_obj.end = dates[1]
-    if names is None:
-        query_obj.names = idb.channel_names()
-    else:
-        query_obj.names = names
-    query_data = query_obj.influx_query()
+    query_data = query_obj.influx_query(names, update=True)
     return query_data
 
-def get_measurement_id(df):
-    sorted_df = df.sort_values(by="start").reset_index()
-    sorted_df["count"] = sorted_df.groupby(by=[sorted_df['start'].dt.date, sorted_df["serial"]]).cumcount()+1
-    sorted_df["key"] = ((sorted_df["start"].dt.strftime("%d.%m.")) + (sorted_df["count"].astype(str)) + "-" + sorted_df["serial"])
-    return sorted_df
+
 def filter_location(data, building):
     """
     filter data if both ts1 & ts2 read in into separate dictionaries based on reference
@@ -64,6 +59,10 @@ def filter_location(data, building):
                 dic["reference"]["Measurement Reference"].iloc[0][0] == '2')}
             return ts2_dict
 
+def ts1_beamline_names():
+    """return list of beamlines in ts1
+    """
+    return []
 def ts2_beamline_names():
     """
     returns a list of beamline names in ts2
@@ -239,7 +238,7 @@ def peaks_finder(data):
     Returns:
         2 arrays of peak flux and energy for three regions
     """
-    
+
     energy, flux = np.array(extract_spectrum(data))
     #border threshold to reflect change in signal
     
@@ -257,21 +256,25 @@ def convert_date_to_string(dt):
     Returns:
         str
     """
-    return str(np.datetime_as_string(dt))
+    return str(np.datetime_as_string(dt))#
 
 def get_east_west_names(reference):
     ref = reference["Measurement Reference"].iloc[0]
-    if ref[1] == "C" or ref[1] == "N" or ref[1] == "I" or ref[1] == "E":
-        return ["chipir", "nimrod", "imat", "let"]
-    elif ref[1] == "W" or ref[1] =="L" or ref[1] ==ref[1] =="O" or ref[1] =="P" or ref[1] =="S" or ref[1] =="Z" or ref[1] == "T":
-        return ["wish", "larmor", "offspec", "inter", "polref", "sans2d", "zoom"]
-    elif ref[1] == "B":
-        return ["beamline"]
-    else:
-        "ts1 or beamline"
-        return []
+    if ref[0] == "1":
+        return
+    
+    elif ref[0] == "2":
+        if ref[1] == "C" or ref[1] == "N" or ref[1] == "I" or ref[1] == "E":
+            return ["chipir", "nimrod", "imat", "let"]
+        elif ref[1] == "W" or ref[1] =="L" or ref[1] ==ref[1] =="O" or ref[1] =="P" or ref[1] =="S" or ref[1] =="Z" or ref[1] == "T":
+            return ["wish", "larmor", "offspec", "inter", "polref", "sans2d", "zoom"]
+        elif ref[1] == "B":
+            return ["beamline"]
+        else:
+            "ts1 or beamline"
+            return []
 
-def get_names(ref):
+def get_beamline_name(ref):
     """
     get building and beamline name as list of str
     Args:
@@ -288,7 +291,6 @@ def get_names(ref):
     ts2 = {"epb":"B", "chipir": "C", "imat": "I", "inter": "T", "larmor": "L", "let":"E", 
            "nimrod":"N", "offspec":"O", "polref":"P", "sans2d":"S", "wish":"W", "zoom":"Z"}
     #extracts a code reference format : 2ZT-3 : ts2, zoom, top, 3rd measurement
-    #ref = data["Measurement Reference"].iloc[0]
 
     if ref[0] == "1":
         match = next((key for key, value in ts1.items() if ref[1:3] in value), "null")
@@ -306,7 +308,7 @@ def filter_shutters(data, shutters):
     filter all shutter query info for beamline shutters and current
 
     Args:
-        data (dict): diamon data
+        data (object): diamon data
         shutters (dict): shutter df
 
     Returns:
@@ -383,13 +385,13 @@ def normalise_dose(data):
     Returns:
         dict: data with extra col for normalised dose
     """
-    target_station = get_names(data.reference["Measurement Reference"].iloc[0])[0]
+    target_station = get_beamline_name(data.reference["Measurement Reference"].iloc[0])[0]
     if target_station == "ts1":
         #divide by mean current at the time and for 0 current set dose to 0
         # 30 is average beam current for day
-        data.out_data["norm_dose"] = (30 * data.out_data["H*(10)r"].divide(data.out_data["ts1_current"]).replace(np.inf, 0))
+        data.out_data["norm_dose"] = (160 * data.out_data["H*(10)r"].divide(data.out_data["ts1_current"]).replace(np.inf, 0))
     if target_station == "ts2":
-        data.out_data["norm_dose"] = (30 * data.out_data["H*(10)r"].divide(data.out_data["ts2_current"]).replace(np.inf, 0))
+        data.out_data["norm_dose"] = (35 * data.out_data["H*(10)r"].divide(data.out_data["ts2_current"]).replace(np.inf, 0))
     return data
 
 def dominant_energy(energy):
@@ -469,7 +471,7 @@ def filter_shutter_status(data, selected_shutter, bb=False):
         result = filter_low_beam_current(result, 25)
         #remove epb measurements with no shutter status
         # check has a valid shutter
-        building, name = get_names(result.reference['Measurement Reference'].iloc[0])
+        building, name = get_beamline_name(result.reference['Measurement Reference'].iloc[0])
         result_location = get_east_west_names(result.reference)
         if name == "epb":
             #take the last line of out data
@@ -576,12 +578,12 @@ def get_x_y_z(data1, data2):
 def get_out_from_name(data):
     return
 
-def check_updated_shutter_info(shutters):
+def check_updated_shutter_info(shutters, beam_df):
     # add check to load new data
     date = get_date_df(shutters, "ts2_current", "_time")
     if date.date() < datetime.today().date():
         print("Updating shutter information \n")
-        shutters = append_new_shutter_info(shutters)
+        shutters = append_new_shutter_info(shutters, beam_df)
         #saves new shutter information into pickle for later use
         save_pickle(shutters, "shutter_data")
         print("saved new data and loaded into program \n")
@@ -596,24 +598,29 @@ def get_date_df(df, channel_name, colname):
     Returns:
         datetime
     """
-    time = df[channel_name][colname]
+    time = df[channel_name].index
     last_time = time.max()
     return last_time
 
-def append_new_shutter_info(shutters):
-    new = latest_shutters(shutters)
-    result = {key: pd.concat([shutters[key], df], ignore_index=True) for key, df in new.items()}
+def append_new_shutter_info(shutters, beam_df):
+    new = latest_shutters(shutters, beam_df)
+    result = {}
+    for key, df in new.items():
+        if key in shutters.keys():
+            result[key] = pd.concat([shutters[key], df])
+        else:
+            result[key] = df
     return result
 
-def latest_shutters(current_shutter):
+def latest_shutters(current_shutter, beam_df):
     last_time = get_date_df(current_shutter,"ts2_current", "_time")
     last_time = last_time.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
     today = idb.date_to_str(datetime.today())
     dates = [last_time, today]
-    shutters = influx_db_query(dates)
+    shutters = influx_db_query(dates, beam_df.channel_name)
     return shutters
 
-def localise_tz(shutter, data, timezone):
+def localise_tz(data, timezone):
     # ensure non datetime entries are valid
     data["_time"] = dd.to_datetime(data["_time"], errors='coerce')
     data["_time"] = data["_time"].dt.tz_localize(timezone)
