@@ -100,8 +100,7 @@ class query_object:
             elif channel == "local::beam:target2":
                 name = "ts2_current"
             else:
-                name = channel_names[channel_names == channel].index[0][1]
-
+                name = channel
             idb_data[name] = df.sort_index()
         return idb_data
 
