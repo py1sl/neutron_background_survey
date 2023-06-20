@@ -6,9 +6,10 @@ import re
 import pytz
 import src.diamon_analysis as da
 import src.neutronics_analysis as na
+import math
 import src.shutter_analysis as sa
 
-loc_path = "data\Measurement_location.csv"
+loc_path = "data\measurement_location.csv"
 diamon_path = "data\measurements\DIAMON*"
 
 class diamon:
@@ -18,8 +19,6 @@ class diamon:
         self.rate_data : pd.DataFrame()
         self.datetime : datetime
         self.file_name = ""
-        self.pos = []
-        self.location = [0,0,0]
         self.energy_bin = []
         self.flux_bin = []
         self.dose : float
@@ -136,9 +135,26 @@ class diamon:
             else:
                 print("Error: please input a valid folder directory")
                 break
-
-    def get_shutter_name(self):
+    @property
+    def beam_name(self):
         return self.beamlines.name
+
+    def find_distance(self, dimension=2):
+        """
+        get 2d and 3d pythag distance between coordinates and the origin
+        Args:
+            self (diamon class)
+            dimension (int, optional): 2d or 3d dimension. Defaults to 2.
+        """
+        self.x = self.reference["x"].iloc[0]
+        self.y = self.reference["y"].iloc[0]
+        if dimension == 2:
+            self.distance =  math.sqrt(self.x**2 + self.y**2)
+        elif dimension == 3:
+            self.z = self.reference["z"].iloc[0]
+            self.distance = math.sqrt(self.x**2 + self.y**2 + self.z**2)
+        else:
+            raise Exception("invalid dimension - only 2 or 3 allowed")
 
 def read_data_file(path, i, j):
     """_summary_
@@ -225,11 +241,11 @@ def load_diamon(loc_data, shutter_data):
     """
     diamon_list = [diamon(folder) for folder in glob.glob(diamon_path)]
     # match the location from the file name ref to coord to get shutter info
-    diamon_list = match_id_location(loc_data, diamon_list, shutter_data)
+    diamon_list = match_id_location(loc_data, diamon_list)
     diamon_dict =  {data.file_name: data for data in diamon_list}
     return diamon_dict
 
-def match_id_location(loc_data, data, shutters):
+def match_id_location(loc_data, data):
     id_list = [diamon_obj.id for diamon_obj in data]
     id = get_measurement_id(pd.DataFrame(id_list))
     data = [match_location(loc_data, diamon_obj, id) for diamon_obj in data]
@@ -254,12 +270,21 @@ def match_location(location_data, data, id):
     """
     # first check there isnt a duplicate
     # load location
-    print(data.folder_name)
     data.file_name = id[id["start"] == data.start_time]["key"].values[0]
 
     #what if cant find reference
     data.reference = location_data.loc[location_data["Name"] == data.file_name].reset_index()
+    #find 2d distance
+    data.find_distance(2)
     #get beamline and building names for data being measured
+    # NEED MOVE THIS
     beamline_df = pd.read_csv("data/target_station_data.csv", index_col=["Building", "Location"])
     data.beamlines = sa.beamline(data.reference["Measurement Reference"].iloc[0], beamline_df)
     return data
+
+def set_beamline_info(data):
+    location_data = pd.read_csv("data/measurement_location.csv", dtype={'x': float, 'y': float, 'z':float})
+    beamline_df = pd.read_csv("data/target_station_data.csv", index_col=["Building", "Location"])
+    for result in data.values():
+        result.reference = location_data.loc[location_data["Name"] == result.file_name].reset_index()
+        result.beamlines = sa.beamline(result.reference["Measurement Reference"].iloc[0], beamline_df)
