@@ -1,7 +1,8 @@
 import pandas as pd
 import re
 import pytz
-import pickle
+import dill as pickle
+import numpy as np
 from datetime import datetime
 
 def read_csv(path, type_dict=object):
@@ -14,6 +15,9 @@ def date_to_str(current_tz: pytz.tzinfo.BaseTzInfo, target_tz: pytz.tzinfo.BaseT
     return date_str
 
 def localise_datetime(source: pytz.tzinfo.BaseTzInfo, target: pytz.tzinfo.BaseTzInfo, datetime_object):
+    """
+    Localise datetime object to required timezone
+    """
     normalised_datetime = source.normalize(source.localize(datetime_object))
     localised_timezone_datetime = normalised_datetime.astimezone(target)
     localised_plain_datetime = localised_timezone_datetime.replace(tzinfo=None)
@@ -71,3 +75,11 @@ def clean(line):
     line = " ".join(line.split())
     line = line.split()
     return line
+
+def calc_bin_widths(bins: np.array):
+    """
+        Calculates bin widths for set of bins that is an numpy array
+    """
+    bw = np.diff(bins)
+    bw = np.insert(bw, 0, bins[0], axis=0)
+    return bw
