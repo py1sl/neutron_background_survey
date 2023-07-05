@@ -7,38 +7,55 @@ import pytz
 import numpy as np
 
 class beamline():
+    """
+    This class defines a neutron instrument information - location
+    & neighbours
+    """
     def __init__(self, ref, df):
         self.target_station = ref[0]
         if self.target_station == "1":
             self.current_info = "ts1_current"
         elif self.target_station == "2":
             self.current_info = "ts2_current"
-        if ref[1] == "B":
-            self.get_beam_info(ref)
-        else:
-            self.get_info(ref, df)
+        self.get_info(ref, df)
 
     def __str__(self):
         return self.name
 
     def get_info(self, ref, df):
-
-        beamline = df[df["key"] == ref[1:3]]
-        self.name = beamline.Name.values[0]
-        self.building_position = beamline.index.get_level_values("Location")[0]
-        beam_df = df.xs(beamline.index.get_level_values("Location")[0], level="Location").set_index("Name")
+        beam_info = df[df["key"] == ref[1:3]]
+        self.name = beam_info.Name.values[0]
+        self.set_building_position(beam_info)
+        beam_df = df.xs(beam_info.index.get_level_values("Location")[0], level="Location").set_index("Name")
         self.all_neighbours = beam_df
-        self.closest_neighbours = self.set_neighbours(beam_df)
+        try:
+            self.closest_neighbours = self.set_neighbours(beam_df)
+            
+        except ValueError:
+            print("error on beamline - no near neighbours")
         self.influx_data = self.all_neighbours.index.tolist()
         self.influx_data.append(self.current_info)
 
-    def get_beam_info(self, ref):
+    def get_beam_info(self):
         self.name = "no_beamline"
         self.influx_data = [self.current_info]
+
     def set_neighbours(self, df):
         idx = df.loc[self.name].Number
         return df[(df.Number == idx -1) | (df.Number == idx +1)]
 
+    def set_building_position(self, beamline):
+        self.building_position = beamline.index.get_level_values("Location")[0]
+    @staticmethod
+    def get_location(beam, df):
+        try:
+            location = beam.location
+        except AttributeError:
+            beamline.set_location_result(beam, df)
+            location = beam.location
+        except KeyError:
+            print("no beamline")
+        return location
 def load_shutter_data():
     shutter_data = na.load_pickle("shutter_data")
     beamline_df = pd.read_csv("data/target_station_data.csv", index_col=["Building", "Name"])
@@ -80,7 +97,9 @@ def get_date_df(df, channel_name, max=True):
 
 def append_new_shutter_info(shutters, new_data):
     new_shutters = {key: pd.concat([shutters[key], df])  if key in shutters.keys() else shutters[key] for key, df in new_data.items()}
-    return new_shutters
+    #get correct names
+    shutters = channel_names(new_shutters)
+    return shutters
 
 def latest_shutters(current_shutter, beam_df):
     last_time = get_date_df(current_shutter["current"],"ts2_current")
@@ -126,13 +145,14 @@ def filter_shutters(data, shutter_data):
     """
     #get beamline and building names for data being measured
     beamlines = data.beamlines.influx_data
+    print(data.beamlines)
     shutter_list = {name: df for name, df in shutter_data.items() if name in beamlines}
     times = np.array(data.out_data["datetime"])
     # if on the epb no shutter info - not near a beamline only get current
     for name, df in shutter_list.items():
         df = df.sort_index()
         data.out_data[name] = [get_query_info(df, time, name) for time in times]
-    if data.beamlines.name != "no_beamline":
+    if "beamline" not in data.beam_name:
         data.out_data["shutter-open"] = data.out_data[data.beamlines.name]
     #normalise dose to the current
     data = normalise_dose(data)
@@ -152,11 +172,9 @@ def get_query_info(data, time, name):
     status = data.loc[:time].tail(1)["_value"].values[0]
     if "current" in name:
         return status
-    if status == 1:
+    if (status == 1):
         return True
-    elif status == 2:
-        return False
-    elif status == 3:
+    else:
         return False
 
 def normalise_dose(data):
@@ -169,8 +187,26 @@ def normalise_dose(data):
         data: diamon class object with normalised dose for each time
     """
     if data.beamlines.target_station == "1":
-        data.out_data["norm_dose"] = (140 * data.out_data["H*(10)r"].divide(data.out_data[data.beamlines.current_info]).replace(np.inf, 0))
+        data.out_data["norm_dose"] = (140 * data.out_data["H*(10)r"].divide(data.out_data[data.beamlines.current_info]))
+        condition = (~np.isfinite(data.out_data["norm_dose"])) |(data.out_data["ts1_current"] < 120)
+        data.out_data["norm_dose"] = np.where((condition) , data.out_data["H*(10)r"], data.out_data["norm_dose"])
     elif data.beamlines.target_station == "2":
-        data.out_data["norm_dose"] = (35 * data.out_data["H*(10)r"].divide(data.out_data[data.beamlines.current_info]).replace(np.inf, 0))
+        data.out_data["norm_dose"] = (35 * data.out_data["H*(10)r"].divide(data.out_data[data.beamlines.current_info]))
+        condition = (~np.isfinite(data.out_data["norm_dose"])) |(data.out_data["ts2_current"] < 25)
+        data.out_data["norm_dose"] = np.where((condition) , data.out_data["H*(10)r"], data.out_data["norm_dose"])
+
     data.norm_dose = data.out_data["norm_dose"].tail(1)
+    return data
+
+#ts1 contains overllaping shutter for different beamlines so need map to correct names
+def channel_names(shutter_data):
+    names_df = pd.read_csv("data/target_station_data.csv", index_col=["Name"])
+    data = {}
+    for key, channel in shutter_data.items():
+        names = names_df[names_df.channel_name == key].index.to_numpy()
+        if "current" in key:
+            data[key] = channel
+        else:
+            for name in names:
+                data[name] = channel
     return data
