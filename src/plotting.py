@@ -214,7 +214,7 @@ def func(x, y):
 def plot_df(dfs, z_labels, levels, cticks, labels=["", ""]):
     for z_label in z_labels:
         df_list = {label: da.split_df_axis(data, z_label) for label, data in zip(labels,dfs)}
-        p.plot_dose_map(df_list, z_label,  levels, cticks)
+        plot_dose_map(df_list, z_label,  levels, cticks)
 def plot_dose_map(df_dict, z_label, labels, levels, cticks, save_name=["", ""]):
 
     fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(17,8))
