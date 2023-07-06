@@ -142,8 +142,8 @@ class diamon:
             else:
                 print("Error: please input a valid folder directory")
                 break
-    @property
-    def beam_name(self):
+
+    def get_shutter_name(self):
         return self.beamlines.name
 
     def find_distance(self, dimension=2):

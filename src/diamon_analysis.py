@@ -376,7 +376,7 @@ def flag_shutter(data, shutter, flag=True):
     if shutter == "own":
         shutter = "shutter-open"
     data = data[(data[shutter] == flag) | (data[shutter].isna())]
-    averaged_data = average_repeated_data(data, shutter).dropna(subset = ['x', 'y', 'norm_dose']).reset_index()
+    averaged_data = average_repeated_data(data).dropna(subset = ['x', 'y', 'norm_dose']).reset_index()
     return averaged_data
 
 def average_repeated_data(df, shutter):
@@ -591,4 +591,3 @@ def compare_df(df, labels, status=[True, False], shutters=None):
         df2 = flag_shutter(df, shutters[1], status[1])
     df_dict = {labels[0]: df1, labels[1]: df2}
     return df_dict
-    
