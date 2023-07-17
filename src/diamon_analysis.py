@@ -1,11 +1,11 @@
 import numpy as np
 import pandas as pd
-#issue with scipy - cant import lib?
 from scipy.signal import find_peaks
 import pickle
-import src.influx_data_query as idb
 from datetime import datetime
 import dask.dataframe as dd
+from collections import defaultdict
+import src.influx_data_query as idb
 
 def save_pickle(data, name):
     """
@@ -52,55 +52,14 @@ def filter_location(data, building):
     match building:
         case "TS1":
             ts1_dict = {key: dic for key, dic in data.items() if (
-                dic["reference"]["Measurement Reference"].iloc[0][0] == '1')} 
+                dic.beamlines.target_station == '1')} 
             return ts1_dict
         case "TS2":
             ts2_dict = {key: dic for key, dic in data.items() if (
-                dic["reference"]["Measurement Reference"].iloc[0][0] == '2')}
+                dic.beamlines.target_station == '2')}
             return ts2_dict
 
-def ts1_beamline_names():
-    """return list of beamlines in ts1
-    """
-    return []
-def ts2_beamline_names():
-    """
-    returns a list of beamline names in ts2
-    """
-    return ["chipir", "sans2d", "wish", 
-                "inter", "offspec", "let", 
-                "nimrod", "polref", "zoom", "larmor", 
-                "imat", "epb"]
-def names():
-    """
-    returns a list of beamline names in ts2
-    """
-    return ["C", "S", "W", 
-                "T", "O", "E",
-                "N", "P", "Z", "L", 
-                "I", "B"]
-    
-#ToDO: needs tidying up
-def convert_to_df(data):
-    """
-    returns a dictionary of dataframes with keys for each
-    instrument beamline. if on epb = epb
-    
-    """
-    beam_df = {}
-    beamline_names = names()
-    for i, name in enumerate(beamline_names):
-        series_list = []
-        for result in data.values():
-            ref = result.reference["Measurement Reference"].iloc[0]
-            if ref[1] == beamline_names[i]:
-                series_list.append(convert_to_ds(result))
-        beam_df[name] = pd.DataFrame(series_list)
-        if not beam_df[name].empty:
-            beam_df[name] = beam_df[name].sort_values("distance")
-    return beam_df
-
-def convert_to_ds(data):
+def convert_to_ds(data, labels):
     """
     Convert list of labels and the data into a pandas series
     Args:
@@ -125,7 +84,11 @@ def convert_to_ds(data):
 
     s1 = pd.Series(data_list, index=labels)
     # call function to find 2d distance
-    s1 = get_distance(s1)
+    try:
+        s1["distance"] = data.distance
+    except AttributeError:
+        # need get distance
+        data.distance = data.find_distance()
     return s1
 
 def convert_status_to_ds(data):
@@ -145,24 +108,14 @@ def convert_status_to_ds(data):
                  data.reference['z'].iloc[0]]
 
     s1 = pd.Series(data_list, index=labels)
-    s1 = get_distance(s1)
+    # first get distance
+    try:
+        data.find_distance()
+        s1["distance"] = data.distance
+    except AttributeError:
+        # need get distance
+        data.distance = data.find_distance()
     return s1
-
-def get_distance(data, dimension=2):
-    """
-    get 2d and 3d pythag distance between coordinates and the origin
-    Args:
-        data (panda series): series containing diamon data
-        dimension (int, optional): 2d or 3d dimension. Defaults to 2.
-
-    Returns:
-        data (series): data with distance column added
-    """
-    if dimension == 2:
-        data['distance'] = np.sqrt(data['x']**2 + data['y']**2)
-    elif dimension == 3:
-        data['distance'] = np.sqrt(data['x']**2 + data['y']**2 + data['z']**2)
-    return data
 
 def combine_continuous_data_files(dataframes, cum_time=None):
     """
@@ -258,98 +211,7 @@ def convert_date_to_string(dt):
     """
     return str(np.datetime_as_string(dt))#
 
-def get_east_west_names(reference):
-    ref = reference["Measurement Reference"].iloc[0]
-    if ref[0] == "1":
-        return
-    
-    elif ref[0] == "2":
-        if ref[1] == "C" or ref[1] == "N" or ref[1] == "I" or ref[1] == "E":
-            return ["chipir", "nimrod", "imat", "let"]
-        elif ref[1] == "W" or ref[1] =="L" or ref[1] ==ref[1] =="O" or ref[1] =="P" or ref[1] =="S" or ref[1] =="Z" or ref[1] == "T":
-            return ["wish", "larmor", "offspec", "inter", "polref", "sans2d", "zoom"]
-        elif ref[1] == "B":
-            return ["beamline"]
-        else:
-            "ts1 or beamline"
-            return []
 
-def get_beamline_name(ref):
-    """
-    get building and beamline name as list of str
-    Args:
-        data (df): df of measurement location reference
-
-    Returns:
-        list: str
-    """
-    ts1 = {"sandals": "Sa", "prisma": "Pr", "surf": "Su",
-           "crisp": "Cr", "loq": "Lq", "iris": "Is", "polaris":"Pl",
-           "tosca": "Ts", "Het": "Ht", "pearl": "Pe", "hrpd": "Hr", "engin-x": "Ex",
-           "gem": "Gm", "Mari": "Me", "sxd":"Sx", "vesuvio": "Vs", "maps": "Ms",
-           "chronus": "Ch", "argus": "Ar", "musr": "Mu", "hifi": "Hi", "epb":"BL"}
-    ts2 = {"epb":"B", "chipir": "C", "imat": "I", "inter": "T", "larmor": "L", "let":"E", 
-           "nimrod":"N", "offspec":"O", "polref":"P", "sans2d":"S", "wish":"W", "zoom":"Z"}
-    #extracts a code reference format : 2ZT-3 : ts2, zoom, top, 3rd measurement
-
-    if ref[0] == "1":
-        match = next((key for key, value in ts1.items() if ref[1:3] in value), "null")
-        building = "ts1"
-    elif ref[0] == "2":
-        match = next((key for key, value in ts2.items() if ref[1] in value))
-        building = "ts2"
-    else:
-        print("No building match found! ")
-        return
-    return [building, match]
-
-def filter_shutters(data, shutters):
-    """
-    filter all shutter query info for beamline shutters and current
-
-    Args:
-        data (object): diamon data
-        shutters (dict): shutter df
-
-    Returns:
-        dict: diamon data with out data having a current and shutter status at each timestep
-    """
-    #get beamline and building names for data being measured
-    shutter_list = get_east_west_names(data.reference)
-    # if on the epb no shutter info - not near a beamline only get current
-    if len(shutter_list) > 1:
-        for name in shutter_list:
-            sel_shutter = shutters[name].sort_index()
-            data.out_data[name] = [get_query_info(sel_shutter, time) for time in data.out_data["datetime"]]
-        data.out_data["shutter-open"] = data.out_data[data.beamline]
-    #call function to extract ts1 and ts2 current
-    data.out_data["ts2_current"] = get_current_info(data, shutters["ts2_current"])
-    data.out_data["ts2_current"] = data.out_data["ts2_current"].fillna(0)
-    #normalise dose to the current
-    data = normalise_dose(data)
-    return data
-
-def get_query_info(data, time):
-    """
-    get shutter status at most recent time since the selected time
-    Args:
-        data (df): shutter df indexed by datetime
-        time (datetime object): time of recordingdatetime
-
-    Returns:
-        boolean: true if shutter open (2), false if shutter closed/setup (1/3)
-    """
-    #extract the tail of df where shutter df matches previous times
-    #print(data.tail(4))
-    status = data.loc[:time].tail(1)["_value"].values[0]
-   #status = data[data["_time"] < time].tail(1)["_value"].values[0]
-    if status == 1:
-        return True
-    if status == 2:
-        return False
-    if status == 3:
-        return False
-    
 def get_current_info(data, current_df):
     """
     extract current information from time of data
@@ -375,24 +237,6 @@ def get_current_info(data, current_df):
         filtered_current = current_df.loc[start:time]["_value"]
         currents.append(np.mean(filtered_current))
     return  currents
-# TODO: fix dose when 0 current 
-def normalise_dose(data):
-    """
-    normalise dose measurement to the current
-    Args:
-        data (dict): dict of measurement data
-
-    Returns:
-        dict: data with extra col for normalised dose
-    """
-    target_station = get_beamline_name(data.reference["Measurement Reference"].iloc[0])[0]
-    if target_station == "ts1":
-        #divide by mean current at the time and for 0 current set dose to 0
-        # 30 is average beam current for day
-        data.out_data["norm_dose"] = (160 * data.out_data["H*(10)r"].divide(data.out_data["ts1_current"]).replace(np.inf, 0))
-    if target_station == "ts2":
-        data.out_data["norm_dose"] = (35 * data.out_data["H*(10)r"].divide(data.out_data["ts2_current"]).replace(np.inf, 0))
-    return data
 
 def dominant_energy(energy):
     """
@@ -449,46 +293,47 @@ def find_spect_peaks(data):
         flux_list.append(flux)
     return energy_list, flux_list
 
-def check_east_west(name):
-    west = ["chipir", "nimrod", "imat", "let"]
-    east = ["wish", "larmor", "offspec", "inter", "polref", "sans2d", "zoom"]
-    if name in west:
-        return "west"
-    elif name in east:
-        return "east"
-    else:
-        #beamline
-        return "beam"
-
-def filter_shutter_status(data, selected_shutter, bb=False):
+def filter_shutter_status(data, selected_shutter="all"):
     """
     for each result get a df
     filter the dataframe by open or closed shutter
     """
-    filtered_df = []
+    filtered_list = []
     for result in data.values():
+        new_df = []
+        if result.out_data.empty:
+            continue
         #remove low current
-        result = filter_low_beam_current(result, 25)
+        #result = filter_low_beam_current(result, 25)
         #remove epb measurements with no shutter status
         # check has a valid shutter
-        building, name = get_beamline_name(result.reference['Measurement Reference'].iloc[0])
-        result_location = get_east_west_names(result.reference)
-        if name == "epb":
-            #take the last line of out data
-            out = result.out_data.iloc[-1]
-            dseries = (convert_status_to_ds(result))
-            filtered_df.append(pd.concat([dseries, out]))
-        elif building == "ts1":
+        if "shutter-open" not in result.out_data.columns:
+            #print("This result is not on a beamline")
+            last_row = result.out_data.iloc[[-1]]
+            new_df = convert_row_series(result, last_row).set_index("key")
+            filtered_list.append(new_df)
             continue
-        elif selected_shutter == "own":
-            print(result.file_name)
-            name = "shutter-open"
-            filtered_df = filtered_df + (last_row_shutter_change(result, name))
-        elif name in selected_shutter:
-            for name in selected_shutter:
-                filtered_df = filtered_df + (last_row_shutter_change(result, name))
-
-    df = pd.DataFrame(filtered_df)
+        else:
+            if selected_shutter == "closest":
+                neighbours = result.beamlines.closest_neighbours.index.to_numpy()
+                neighbours = np.append(neighbours, result.beamlines.name)
+            else:
+                neighbours = result.beamlines.all_neighbours.index.to_numpy()
+            for neighbour in neighbours:
+                change_df = last_row_shutter_change(result, neighbour)
+                if change_df is not None:
+                    new_df.append(change_df)
+        # append last entry
+        last_row = result.out_data.iloc[[-1]]
+        combined_row = convert_row_series(result, last_row)
+        new_df.append(combined_row)
+        if selected_shutter == "closest":
+            combined_df = pd.concat(new_df).set_index("key")
+            new_df = drop_shutters(neighbours, combined_df)
+        else:
+            new_df = pd.concat(new_df).set_index("key")
+        filtered_list.append(new_df)
+    df = pd.concat(filtered_list)
     return df
 
 def last_row_shutter_change(result, shutter_name):
@@ -501,18 +346,28 @@ def last_row_shutter_change(result, shutter_name):
         list: list of shutter status
     """
     data = result.out_data
-    data = data[(result.out_data["t(s)"] > 1000) | (result.out_data["Hr_un%"] < 20)]
-    #get df of data when shutter is open
-    df = data[shutter_name]
-    #get boolean for index of row where change in status and always get last value in df
-    filter = (df.ne(df.shift(-1)))
-    last = df.tail(1)
-    change_times = data[(filter) | (last)]
-    filtered_list  = []
-    for _, row in change_times.iterrows():
-        dseries = convert_status_to_ds(result)
-        filtered_list.append(pd.concat([dseries, row]))
-    return filtered_list
+    # ignore transient data (< 1000 seconds)
+    data = data[(result.out_data["t(s)"] > 1000)]
+    #get df of data when shutter changes
+    try:
+        change_times = shutter_change(data[shutter_name], data)
+    except KeyError:
+        change_times = None
+    if change_times is None:
+        return
+    change_times["shift"] = change_times["t(s)"].shift(1)
+    change_times["shift"].fillna(0, inplace=True)
+    change_times = change_times[(change_times["t(s)"] - change_times["shift"]) > 500]
+    merged_df = convert_row_series(result, change_times)
+    return merged_df
+
+def drop_shutters(names, df):
+    shutter_keep = df.loc[:, names]
+    #own_df = df.loc[:, "shutter-open"]
+    #df["truth"] = np.where((~shutter_keep.any(axis=1)) & (own_df == True), True, False)
+    #df["truth"] = np.where(((shutter_keep.all(axis=1)) & (own_df == False)), True, False)
+    df["truth"] = np.where(shutter_keep.all(axis=1), True, np.where((~shutter_keep).all(axis=1), False, np.nan))
+    return df
 
 def flag_shutter(data, shutter, flag=True):
     """
@@ -521,10 +376,9 @@ def flag_shutter(data, shutter, flag=True):
     if shutter == "own":
         shutter = "shutter-open"
     data = data[(data[shutter] == flag) | (data[shutter].isna())]
-    averaged_data = average_repeated_data(data, shutter).dropna(subset = ['x', 'y', 'norm_dose']).reset_index()
+    averaged_data = average_repeated_data(data).dropna(subset = ['x', 'y', 'norm_dose']).reset_index()
     return averaged_data
 
-#error when doing this
 def average_repeated_data(df, shutter):
     """
     When measurement has multiple data for same date and location take average of data
@@ -532,14 +386,15 @@ def average_repeated_data(df, shutter):
         df (dataframe): key information for data in df
     returns: filtered df with averages taken for repeats
     """
-    keep = df[["key", "reference", "start", "end", shutter]].drop_duplicates()
-    filtered_df = df.groupby("key").mean(numeric_only=True)
-    averaged_df = pd.merge(filtered_df, keep, on="key")
-    return averaged_df
+    #keep = df[[ "reference", "start", "end", "shutter-open"]].drop_duplicates()
+    df = df.infer_objects()
+    filtered_df = df.groupby(["key", shutter]).mean(numeric_only=True).reset_index()
+    #averaged_df = pd.merge(filtered_df, keep, on="")
+    return filtered_df
 
 def filter_low_beam_current(data, minimum_current):
     """
-    This function removes any data in out iles where beam current less than the argument minimum current
+    This function replaces any data in out iles where beam current less than the argument minimum current
     Args:
         data (dict): dict of all data information
         minimum_current (float): minimum current to include
@@ -575,6 +430,7 @@ def get_x_y_z(data1, data2):
     #look at dose vs abs error
     z = [shutter_dict["open"]['norm_dose'], shutter_dict["closed"]['norm_dose']]
     return x, y, z
+
 def get_out_from_name(data):
     return
 
@@ -636,7 +492,7 @@ def filter_shutter_open(df, shutter_names):
     Returns:
         _type_: _description_
     """
-    filtered_df = df[ (df[shutter_names].all(axis=1)) & ~(df[shutter_names[0]].isna())]
+    filtered_df = df[ (df[shutter_names].all(axis=1)) & ~(df[shutter_names].isna())]
     return filtered_df
 
 
@@ -653,15 +509,85 @@ def filter_shutter_closed(df, shutter_names):
     filtered_df = df[ (~(df[shutter_names]).any(axis=1)) & ~(df[shutter_names[0]].isna())]
     return filtered_df
 
-def find_neighbours(beamline):
-    
-    # find what beamline performed on
-    beamline_neighbours = {"nimrod":["let"], "let": ["nimrod", "imat"], "imat": ["let", "chipir"], "chipir":["imat"], 
-                   "wish":["larmor"], "larmor":["wish", "offspec"], "offspec":["larmor", "inter"], 
-                    "inter":["offspec", "polref"], "polref":["inter", "sans2d"], 
-                    "sans2d":["polref", "zoom"], "zoom":["sans2d"]}
-    for neighbour in beamline_neighbours.keys():
-        if neighbour == beamline:
-            neighbours = beamline_neighbours[neighbour]
-            return neighbours
+def select_shutter(self, selected_shutter):
+    if self.name == "no_beamline":
+        names = None
+    elif selected_shutter == "all":
+        names = self.all_neighbours.index
+    elif selected_shutter == "closest":
+        names = self.closest_neighbours.index
+        names = np.append(names, self.name)
+    elif selected_shutter == "own":
+        #selected just the own
+        names = self.name
+    elif selected_shutter == "none":
+        names = None
+    return names
 
+def convert_row_series(result, df):
+    dseries = convert_status_to_ds(result)
+    merged_df = pd.merge(dseries.to_frame().T, df, how="cross")
+    return merged_df
+
+
+def shutter_change(df, result):
+    filter = (df.ne(df.shift(1)))
+    change_times = result[filter].iloc[1:]
+    if change_times.empty:
+        return None
+    else:
+        return change_times
+
+def split_reference(text):
+    groups = text.split('-')
+    joined_str = '-'.join(groups[:2]), '-'.join(groups[2:])
+    return joined_str
+
+def find_repeats(df, data):
+    #check likewise data
+    ref = list(set(df["reference"].values))
+    filtered_df_dic = defaultdict(dict)
+    keys = []
+    for text in ref:
+        joined_str = split_reference(text)
+        if joined_str[1] != '':
+            keys.append(joined_str[0])
+            #filtered_df_dic[joined_str[0]] = (df[df["reference"].str.match(joined_str[0])]).drop_duplicates()
+    keys = list(set(keys))
+    for result in data.values():
+        ref = split_reference(result.reference["Measurement Reference"][0])[0]
+        if ref in keys:
+            filtered_df_dic[ref][result.file_name] = result
+    return filtered_df_dic
+
+def summary_df(df : pd.DataFrame, columns : list, save="", duplicates=True):
+    df["real_time"] = pd.to_datetime(df["start"]).add(pd.to_timedelta(df["t(s)"], unit="s"))
+    summary_df = df[columns]
+    if duplicates == False:
+        summary_df = summary_df.drop_duplicates("reference")
+    if save != "":
+        summary_df.to_csv("data/" + str(save) + ".csv")
+    return summary_df
+
+def split_df_axis(df, selected_z):
+    """
+    This function gets positive and negative x,y and selected z values
+    """
+    df.loc[:,"z"] = df.loc[:, selected_z]
+    pos_df = df[df["y"] > 0][["x", "y", "z"]]
+    neg_df = df[df["y"] < 0][["x", "y", "z"]]
+    
+    return [pos_df, neg_df]
+
+def compare_df(df, labels, status=[True, False], shutters=None):
+    """
+    filter df for selected flagged shutter
+    """
+    if shutters is None:
+        df1 = flag_shutter(df, "own", status[0])
+        df2 = flag_shutter(df, "own", status[1])
+    else:
+        df1 = flag_shutter(df, shutters[0], status[0])
+        df2 = flag_shutter(df, shutters[1], status[1])
+    df_dict = {labels[0]: df1, labels[1]: df2}
+    return df_dict
