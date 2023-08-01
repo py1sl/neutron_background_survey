@@ -1,19 +1,32 @@
-import src.diamon as d
-import src.diamon_analysis as da
+import src.diamon_read_data as drd
 import src.shutter_analysis as sa
+import src.diamon_analysis as da
+import pandas as pd
+import numpy as np
+#------MAIN PROGRAM-------#
+# This file will load all relevent data and information to be used for analysis
 
 def main(save=False):
-    """_summary_
-
-    Returns:
-        _type_: _description_
     """
-    shutter_data = sa.load_shutter_data()
-    main_data = d.read_data(shutter_data)
-    main_data = {key: sa.filter_shutters(result, shutter_data) for key, result in main_data.items()}
+    Start of program. Controls the reading in of diamon detector measurements and shutter data
+    from the InfluxDB. Option to save loaded data for future use
+    Args:
+        save (bool) . option to save diamon data. default is False.
+    Returns:
+        dict[diamon]: dictionary of initialised diamon
+    """
+    main_data = drd.read_data()
+    start = drd.get_earliest_entry(main_data)
+    end = drd.get_last_entry(main_data)
+    beamline_df = pd.read_csv("data/target_station_data.csv", index_col=["Building", "Name"])
+    channel_names = beamline_df.channel_name.dropna().to_numpy()
+    channel_names = np.append(channel_names, ["local::beam:target", "local::beam:target2"])
+    channel_data = sa.load_channel_data(start, end, channel_names).filtered_df
+    main_data = {key: sa.filter_shutters(result, channel_data) for key, result in main_data.items()}
     # save
     if save == True:
         da.save_pickle(main_data, "diamon_data")
+        da.save_pickle(main_data, "shutter_data")
     return main_data
 
 def shutter_df(data, selected_shutter, bb):
