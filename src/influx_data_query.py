@@ -1,5 +1,6 @@
 #from datetime import timedelta, datetime
 import datetime
+import numpy as np
 import json
 import warnings
 import pytz
@@ -52,7 +53,6 @@ class query_object():
         self.channels = channels
         self.utc = pytz.timezone("UTC")
         self.timezone = pytz.timezone(timezone)
-        self.raw_dfs : list[pd.DataFrame] = []
         self.filtered_df : dict[dict[pd.DataFrame]] = None
         self.selected_cycles : dict[datetime.datetime] = None
         self.start : str = None
@@ -76,24 +76,6 @@ class query_object():
             datetimes, source_date=self.timezone)
         return string_datetime_pairs
 
-    def merge_adjacent_days_of_data(self):
-        """Concatenate dataframes that directly follow eachother, creating a single DF of continuous data. 
-
-        Args:
-            dfs (list): List of lists of dataframes for each day and each channel queried.
-        Returns:
-            list: list of lists of continuous dataframes.
-        """
-        cont_dfs = {cycle: {} for cycle in self.selected_cycles.keys()}
-        for dfList in (self.dfs()):
-            # save the date of the current dataframe
-            df =  pd.concat(dfList)
-            for key, dates in self.selected_cycles.items():
-                start =  dates[0] - datetime.timedelta(days=1)
-                end =  dates[1] + datetime.timedelta(days=1)
-                cont_dfs[key][self.channels] = df[start:end]
-        return cont_dfs
-
     def influx_query_cycle(self):
         """
         use api influx querir to grab df from influx db. cycledatetimeformatter with influx querier and 
@@ -103,11 +85,31 @@ class query_object():
         string_datetime_pairs = self.cycle_formatter(self.selected_cycles)
         influx_querier = self._load_client_api()
         self.raw_dfs = influx_querier.query_all_data_over_ranges(self.channels, string_datetime_pairs)
+        if self.raw_dfs == []:
+            print("Error: One or more of the channels is incorrectly named")
+            return
+
         self.filtered_df = self.merge_adjacent_days_of_data()
 
-        # TO DO: fix ACCEL CONTROL PROCESS DATA (CONDITION & EMPTY)
-        # influx_data_processor = InfluxDataProcessor(self.data_processing_config, minutes_of_missing_data_to_filter=60)
-        # self.final_dfs = influx_data_processor.fully_process_raw_data(self.dfs)
+    def process_query_cycle(self, filter_condition=lambda dataframe : False, remove_empty_entries: bool =False, 
+                            minutes_missing_data : float = 60):
+        """Uses accel control. processing functions to split and process raw df based on conditions provided
+            
+            Args:
+            filter_condition (df bool, optional): once df is extracted filter based on condition;
+            --example of this is- 'lambda dataframe : dataframe["_value"] > 10'. Defaults to lambda dataframe:False.
+            remove_empty_entries (bool, optional): whether to remove blank entries - no data found on day. Defaults to False.
+            minutes_missing_data (float, optional) : The number of minutes of missing data required before
+            this class cuts out that period from the data, and creates a new continuous dataframe.
+            """
+        for df_list in self.raw_dfs:
+            for df in df_list:
+                df = self.remove_empty_col(df)
+                df["_value"] = self.shutter_channel_value(df)
+        self.data_processing_config = [DataProcessingConfig(
+        channel, filter_condition=filter_condition, remove_empty_periods=remove_empty_entries) for channel in self.channels]
+        influx_processor = InfluxDataProcessor(self.data_processing_config, minutes_missing_data)
+        self.processed_dfs = influx_processor.fully_process_raw_data(self.raw_dfs)
 
     def influx_query_datetime(self):
         """This query method uses two sets of datetimes
@@ -118,6 +120,7 @@ class query_object():
         # try localise start and end
         influx_querier = self._load_client_api()
         self.filtered_df = {channel: self._query_db(influx_querier, channel, self.start, self.end) for channel in self.channels}
+        print("Success - all channels loaded!")
 
     def _load_client_api(self):
         """
@@ -125,7 +128,7 @@ class query_object():
         Returns:
             influx_querier (InfluxQuerier): object initialiased to pull from db
         """
-        with open("src\\influx.auth", 'r') as f: # create a json file with an "AUTH_TOKEN" key
+        with open("src\\influx-neutronics.auth", 'r') as f: # create a json file with an "AUTH_TOKEN" key
             auth_file = json.load(f)
         auth_token = auth_file["AUTH_TOKEN"]
         client = InfluxDBClient(url="https://infra.isis.rl.ac.uk:8086", token=auth_token, org="4298498d740c3795")
@@ -145,6 +148,7 @@ class query_object():
         Returns:
             df: pd.DataFrame
         """
+        print("loading channel: " + channel + "...")
         df = influx_querier.query_influx(influx_querier.client_query_api, channel_name=channel, 
                                         start_time=start, end_time=end)
         if df.empty:
@@ -153,13 +157,26 @@ class query_object():
             start = date_to_str(prev_day)
             df = self._query_db(influx_querier, channel, start, self.start).tail(1)
         else:
-            df = df.drop(['result','table'], axis=1)
+            filtered_df = self.remove_empty_col(df).set_index("_time")
+        return filtered_df
+
+    @staticmethod
+    def remove_empty_col(df):
+        """
+        remove useless result and table columns from final df
+        """
+        df = df.drop(["result", "table"], axis=1)
         return df
 
     @staticmethod
+    def shutter_channel_value(df):
+        """ writes shutter channels in correct form
+        """
+        shutter_status = np.where(df["_value"] == 1, True, np.where((df["_value"] == 2), False, "changing"))
+        return shutter_status
+    @staticmethod
     def check_cycle(date, cycles):
         """
-
         Args:
             date (datetime): datetime object at date of recording
             cycles (list[datetime]): list of 2 datetimes
@@ -190,25 +207,18 @@ class query_object():
         return query
 
     @staticmethod
-    def get_data_cycle(cycles : list[str], channels : list[str], timezone : str="Europe/London",
-                       condition=lambda dataframe : False, remove_empty_entries: bool =False):
+    def get_data_cycle(cycles : list[str], channels : list[str], timezone : str="Europe/London"):
         """
 
         Args:
             cycles (list[str]): list of cycles to call data between
             channels (list[str]): list of channels to get from influx db
             timezone (str, optional): timezone to use - default is europe/london
-            condition (df bool, optional): once df is extracted filter based on condition;
-            -----example of this is- 'lambda dataframe : dataframe["_value"] > 10'. Defaults to lambda dataframe:False.
-            remove_empty_entries (bool, optional): whether to remove blank entries - no data found on day. Defaults to False.
-
         Returns:
             query_object: object query containing key info and df
         """
         query = query_object(channels=channels, timezone=timezone)
         query.selected_cycles = cycle_dict().get_cycle(cycles)
-        query.data_processing_config = [DataProcessingConfig(
-            channel, filter_condition=condition, remove_empty_periods=remove_empty_entries) for channel in channels]
         query.influx_query_cycle()
         return query
 
@@ -242,7 +252,10 @@ def date_to_str(datetime_obj : datetime.datetime, source_timezone : str, target_
     source_timezone = pytz.timezone(source_timezone)
     target_timezone = pytz.timezone(target_timezone)
     localiser = DatetimeLocaliser(source_timezone, target_timezone)
-    date = localiser.convert_datetime_to_string(datetime_obj)
+    try:
+        date = localiser.convert_datetime_to_string(datetime_obj)
+    except AttributeError:
+        return datetime_obj
     return date
 
 def str_to_date(str_date: str, source_timezone, target_timezone="UTC"):
