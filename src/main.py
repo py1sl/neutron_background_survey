@@ -21,7 +21,7 @@ def main(save=False):
     beamline_df = pd.read_csv("data/target_station_data.csv", index_col=["Building", "Name"])
     channel_names = beamline_df.channel_name.dropna().to_numpy()
     channel_names = np.append(channel_names, ["local::beam:target", "local::beam:target2"])
-    channel_data = sa.load_channel_data(start, end, channel_names).filtered_df
+    channel_data = sa.load_channel_data(start, end, channel_names)
     main_data = {key: sa.filter_shutters(result, channel_data) for key, result in main_data.items()}
     # save
     if save == True:
