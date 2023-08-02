@@ -236,7 +236,7 @@ def plot_dose_time(data : diamon, label : str, selected_shutters : str = "all", 
     plt.figtext(0.5, -0.03, " ".join(text), ha="center", fontsize=12)
 
     if save_name != ["", ""]:
-        path = p.save_fig(save_name[0], save_name[1])
+        path = save_fig(save_name[0], save_name[1])
         plt.savefig(path+ ".png", bbox_inches="tight")
     plt.show()
 
@@ -276,7 +276,7 @@ def plot_shutter_change(change_times : dict[pd.DataFrame], ax : plt.axes):
         colors (_type_): _description_
     """
     shutters = change_times.keys()
-    colors = p.shutter_colors().get_color(shutters)
+    colors = shutter_colors().get_color(shutters)
     for name, df in change_times.items():             
         for time in df["t(s)"].to_numpy():
             status =  df[df["t(s)"] == time][name].values[0]
