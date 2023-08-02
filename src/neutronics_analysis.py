@@ -5,6 +5,16 @@ import dill as pickle
 import numpy as np
 from datetime import datetime
 
+class units:
+    def __init__(self):
+        self.dose_rate = r"$\mu Sv h^{-1} $"
+        self.phi = r"cm$^{-2}$s$^{-1}$"
+        self.current = r"$\mu$ A"
+        self.dose = r"$\mu Sv$"
+        self.norm_dose_rate_ts1 = r"$\frac{\mu Sv h^{-1}}{140 \mu A}$"
+        self.norm_dose_rate_ts2 = r"$\frac{\mu Sv h^{-1}}{35 \mu A}$"
+        self.energy_read = r""
+
 def read_csv(path, type_dict=object):
     return pd.read_csv(path,  dtype=type_dict)
 
@@ -38,11 +48,13 @@ def load_pickle(name):
         return pickle.load(f)
 
 def str_to_local_time(test_string):
+    # converts to local time (london)
     test_date = datetime.strptime(test_string, "%a %b %d %H:%M:%S %Y")
     aware_str = pytz.timezone("Europe/London").localize(test_date)
     return aware_str
 
 def read_lines(path):
+    # return list of all lines in a txt file
     with open(path, "r") as f:
         return f.read().splitlines()
 
@@ -66,10 +78,6 @@ def clean_param(line, uncert=None):
     else:
         return float(line[0])
 
-def clean_counts(line):
-    line = clean(line)
-    return int(line[1]), int(line[3])
-
 def clean(line):
     line = line.strip()
     line = " ".join(line.split())
@@ -83,3 +91,29 @@ def calc_bin_widths(bins: np.array):
     bw = np.diff(bins)
     bw = np.insert(bw, 0, bins[0], axis=0)
     return bw
+
+def get_match_dict(match, dic):
+    """match a dict key to str key
+
+    Args:
+        match (str): 
+        dic (dict): 
+
+    Returns:
+        dict: dict with matching key
+    """
+    for key in dic.keys():
+        if key == match:
+            return dic[key]
+
+def sum_columns(df : pd.DataFrame, columns :list[str]):
+    """sums all column values on a given axis for given column
+
+    Args:
+        df (pd.DataFrame): _description_
+        columns (list[str]): _description_
+        axis (int) : opt parameter to specify sum on row or column
+    Returns:
+        df: df with summs
+    """
+    return df.loc[:, columns].sum(axis=1, skipna=True)

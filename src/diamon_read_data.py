@@ -4,181 +4,153 @@ Created on Fri Aug 26 15:55:42 2022
 
 This file will process both the F_UNFOLD and the rate data from DIAMON spectrometer
 """
-import numpy as np
 import pandas as pd
 import glob
-import pickle
-import re
-import diamon_analysis as da
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 from pathlib import Path
-from memory_profiler import profile
-import influx_data_query as idb
+import src.neutronics_analysis as na
+import src.diamon as diamon
+import src.beamline as b
 
-def read_diamon_folders(data_path, location_path):
-    """
-    Reads diamon folders, location data and loads in shutter information 
-    from idb query
-    """
-    folder_list = glob.glob(data_path)
-    # ensures location coordinates read in as float not str
-    locations = pd.read_csv(location_path,  dtype={'x': float, 'y': float, 'z':float})
-    all_data = {}
-    # loop over diamon folders reading each set of files and filtering shutters
-    for folder in folder_list:
-        data = read_folder(folder, locations)
-        all_data[data["name"]] = data
-    return all_data
+loc_path = "data\measurement_location.csv"
+target_station_path = "data\target_station_data.csv"
+diamon_path = "data\measurements\DIAMON*"
 
-def read_folder(folder, locations):
-    """Reads a folder of diamon output files, for varying file types
+# read all data
+def read_data():
+    # try to load exisiting data
+    loc_data = na.read_csv(loc_path, {'x': float, 'y': float, 'z':float})
+    try:
+        data = na.load_pickle("diamon_data")
+        print("checking if there is new data in the directory")
+        data = update_diamon_data(data, loc_data)
+    except FileNotFoundError:
+        print("No existing diamon data- loading all data in file path")
+        data = load_diamon(loc_data)
+    return data
 
-    Args:
-        folder (str - path to file)
-
-    Returns:
-        dic: dict of df 
-    """
-    files_list = glob.glob(folder+"\*")
-    dic = {}
-    dic["name"] = folder.split("\\")[-1]
-    dic["reference"] = locations.loc[locations["Name"] == dic["name"], 
-                                     locations.columns != "index"]
-    for file in files_list:
-        if "C_unfold" in file:
-            c_unfold = read_unfold_file(file)
-            c_unfold["energy_mode "] =  "high"
-            dic["high_e"] = c_unfold
-        elif "counters" in file:
-            counters = read_counters(file)
-            dic["datetime"] = counters
-        elif "F_unfold" in file:
-            f_unfold = read_unfold_file(file)
-            f_unfold["energy_mode"] =  "low"
-            dic["low_e"] = f_unfold
-        elif "LONG_OUT" in file:
-            out_data = read_data_file(file, 0, 3)
-            dic["long_out"] = out_data
-        elif "LONG_rate" in file:
-            rate_data = read_data_file(file, 0, 1)
-            dic["long_rate"] = rate_data
-        elif "OUT_data" in file:
-            #out data gives the dose and %energy neutrons as func of time in set time intervals (6 measurements)
-            out_data = read_data_file(file, 0, 3)
-            dic["out"] = out_data
-        elif "rate" in file:
-            #rate data gives all counts as func of time for each detector in set time intervals (6 measurements)
-            rate_data = read_data_file(file, 0, 1)
-            dic["rate"] = rate_data
-        else:
-            print("Error: please input a valid folder directory")
-            break
-    if "datetime" in dic.keys():
-        dic["out"]["datetime"] = pd.to_timedelta(dic['out']['t(s)'], unit='s') + dic['datetime']['start']
-    else:
-        print("Error in diamon folder: " + dic["name"] + " - no counters file - check data")
-        exit()
-    return dic
-
-def read_unfold_file(path):
-    """Read diamon c/f unfold extracting energy distributions
+def update_diamon_data(existing_data, loc_data):
+    """_summary_
 
     Args:
-        path (_type_): _description_
+        existing_data (_type_): _description_
+        loc_data (_type_): _description_
+
     Returns:
         _type_: _description_
     """
-    in_spect = False
-    dic = {}
-    dic["file_name"] = Path(path).stem
-    energy_bins = []
-    flux_bins = []
-    with open(path) as f:
-        for line in f:
-            if " thermal" in line:
-                dic["thermal"] = clean_param(line)
-            elif "epi" in line:
-                dic["epi"] = clean_param(line)
-            elif "fast" in line:
-                dic["fast"] = clean_param(line)
-            elif "phi" in line:
-                dic["phi"], dic["phi_uncert"] = clean_param(line, True)
-            elif "H*(10)_r" in line:
-                dic["dose_rate"],  dic["dose_rate_uncert"] = clean_param(line, True)
-            elif "h*(10)" in line:
-                dic["dose_area_product"], dic["dose_area_product_uncert"] = clean_param(line, True)
-            elif "D1" in line:
-                dic["count_D1"], dic["count_R"] = clean_counts(line)
-            elif "D2" in line:
-                dic["count_D2"], dic["count_RL"] = clean_counts(line)
-            elif "D3" in line:
-                dic["count_D3"], dic["count_FL"] = clean_counts(line)
-            elif "D4" in line:
-                dic["count_D4"], dic["count_F"] = clean_counts(line)
-            elif "D5" in line:
-                dic["count_D5"], dic["count_FR"] = clean_counts(line)
-            elif "D6" in line:
-                dic["count_D6"], dic["count_RR"] = clean_counts(line)
-            elif "TIME" in line:
-                dic["time"] = float(clean_param(line))
-            elif in_spect and ("----" not in line):
-                line = clean(line)
-                if len(line)<1:
-                    break
-                energy_bins.append(float(line[0]))
-                flux_bins.append(float(line[-1]))
-            elif "Ec" and "Phi(E)*Ec" in line:
-                in_spect = True
-    f.close()
-    dic["energy_bins"] = energy_bins
-    dic["flux_bins"] = flux_bins
-    return dic
+    # check if missing
+    latest_data = get_last_entry(existing_data)
+    file_paths = glob.glob(r"data\ts2_measurements\DIAMON*\counters.txt")
+    # gets all paths that haven't been read into the dictionary of data
+    unread_paths = [
+        x for file_path in file_paths if (x := read_unloaded_file(file_path, latest_data)) is not None]
+    if len(unread_paths) == 0:
+        print("No new data - loading existing file")
+        return existing_data
+    else:
+         new_dic = load_diamon(loc_data, unread_paths)
+         existing_data.update(new_dic)
+         return new_dic
 
-def read_counters(path):
-    with open(path) as f:
-        lines = f.read().splitlines()
-        for i, line in enumerate(lines):
-            if "Measurement Time" in lines[i-1]:
-                time = " ".join(line.strip().split())
-            elif "GMT time" in lines[i-1]:
-                start_time = datetime.strptime(line, "%a %b %d %H:%M:%S %Y")
-                start_time = start_time.replace(tzinfo=timezone.utc)
-                end_time = start_time + timedelta(seconds=float(time))
-    f.close()
-    return {"start": start_time, "end": end_time}
+def get_last_entry(data):
+    # in exisitng group for diamon results get most recent entry
+    return max([file.start_time for file in data.values()])
 
-def read_data_file(path, i, j):
-    data = pd.read_csv(path, sep='\t', index_col=False)
-    data = data.dropna(axis='columns')
-    data = data.drop(data.iloc[:, i:j], axis=1)
-    data = data.replace('\%', '', regex=True)
-    for col in data.columns:
-        if 'un%' in col:
-            data[col]= data[col].astype(float)
+def get_earliest_entry(data):
+    # in exisitng group for diamon results get most recent entry
+    return min([file.start_time for file in data.values()])
+
+def read_unloaded_file(file_path : str, latest_data : datetime):
+    """
+    checks whether a file is from after the latest loaded entry
+    Args:
+        file_path (str): path to file
+        latest_data (datetime): datetime of latest entry
+
+    Returns:
+        _type_: _description_
+    """
+    # record names of files to read in
+    lines = na.read_lines(file_path)
+    for i, line in enumerate(lines):
+        if "GMT time" in lines[i-1]:
+            # convert to correct GMT time
+            aware_str = na.str_to_local_time(line)
+            if aware_str > latest_data:
+                return Path(file_path).parent
+            else:
+                return None
+
+# update info
+def load_diamon(loc_data : pd.DataFrame, data_path : str = diamon_path):
+    """data from diamon instrument loaded from files. data matched with measurement coordinate
+    Args:
+        loc_data (df): pandas dataframe of x, y, z coordinates and data reference
+        fname (str): folder directory to diamon data
+
+    Returns:
+        dictionary of diamon class objects
+    """
+    diamon_list = [diamon.diamon(folder) for folder in glob.glob(data_path)]
+    # match the location from the file name ref to coord to get shutter info
+    diamon_list = match_id_location(loc_data, diamon_list)
+    diamon_dict =  {data.file_name: data for data in diamon_list}
+    return diamon_dict
+
+def match_id_location(loc_data : pd.DataFrame, data : dict[diamon.diamon]):
+    """
+    from location data and id & start of measurement match the id and coordinates
+    Args:
+        loc_data (pd.DataFrame): csv of loc id and coordinate
+        data (dict[diamon]): dictionary of diamon instance containing all data
+
+    Returns:
+        dict: dictionary with diamon data all matched to a location
+    """
+    id_list = [diamon_obj.id for diamon_obj in data]
+    id = get_measurement_id(pd.DataFrame(id_list))
+    data = [match_location(loc_data, diamon_obj, id) for diamon_obj in data]
     return data
 
-#set of functions for string cleaning
-def clean_param(line, uncert=None):
-    line = line.split(":")[1]
-    line = clean(line)
-    if uncert:
-        #uses regular expression package to extract an uncertainty found between a bracket and % symbol
-        line[3] = re.findall('\((.*?)%\)', line[3])
-        return float(line[0]), float(line[3][0])
-    else:
-        return float(line[0])
+def get_measurement_id(df : pd.DataFrame):
+    """
+    creates a key from the start, and id of the measurement. this contains the date and
+    # of which the measurement was at for that day
+    Args:
+        df (pd.DataFrame): 
 
-def clean_counts(line):
-    line = clean(line)
-    return int(line[1]), int(line[3])
+    Returns:
+        df (pd.DataFrame) : sorted df in order of keys
+    """
+    sorted_df = df.sort_values(by="start").reset_index().drop_duplicates(subset=["start"], keep="first", ignore_index=True)
+    sorted_df["count"] = sorted_df.groupby(by=[sorted_df['start'].dt.date, sorted_df["serial"]]).cumcount()+1
+    sorted_df["key"] = ((sorted_df["start"].dt.strftime("%d.%m.")) + (sorted_df["count"].astype(str)) + "-" + sorted_df["serial"])
+    return sorted_df
 
-def clean(line):
-    line = line.strip()
-    line = " ".join(line.split())
-    line = line.split()
-    return line
+def match_location(location_data, data, id):
+    """match location csv file key to data file name
+
+    Args:
+        location_data (df): pd df of xyz and ref.
+        diamon_list (list): list of diamon class obj
+        series_list (list): list of pd data series containing file id's
+
+    Returns:
+        dic: list of diamon obj with keys assigned
+    """
+    # first check there isnt a duplicate
+    # load location
+    data.file_name = id[id["start"] == data.start_time]["key"].values[0]
+
+    #what if cant find reference
+    data.reference = location_data.loc[location_data["Name"] == data.file_name].reset_index()
+    #find 2d distance
+    data.find_distance(2)
+    #get beamline and building names for data being measured
+    beamline_df = pd.read_csv("data/target_station_data.csv", index_col=["Building", "Location"])
+    data.beamlines = b.beamline(data.reference["Measurement Reference"].iloc[0], beamline_df)
+    return data
 
 if __name__ == '__main__':
-    path = r"C:\Users\sfs81547\OneDrive - Science and Technology Facilities Council\Documents\ISIS\Diamon Project\TS2 Measurements\DIAMON*"
-    folders = glob.glob(path)
-    d = read_diamon_folders(path)
+    data = read_data()

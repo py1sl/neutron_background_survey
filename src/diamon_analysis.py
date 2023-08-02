@@ -6,6 +6,7 @@ from datetime import datetime
 import dask.dataframe as dd
 from collections import defaultdict
 import src.influx_data_query as idb
+from src.diamon import diamon
 
 def save_pickle(data, name):
     """
@@ -49,14 +50,11 @@ def filter_location(data, building):
         _type_: _description_
     """
     #match the variable building to the string - building
-    match building:
-        case "TS1":
-            ts1_dict = {key: dic for key, dic in data.items() if (
-                dic.beamlines.target_station == '1')} 
+    if building == "TS1":
+            ts1_dict = {key: dic for key, dic in data.items() if (dic.beamlines.target_station == '1')} 
             return ts1_dict
-        case "TS2":
-            ts2_dict = {key: dic for key, dic in data.items() if (
-                dic.beamlines.target_station == '2')}
+    elif building ==  "TS2":
+            ts2_dict = {key: dic for key, dic in data.items() if (dic.beamlines.target_station == '2')}
             return ts2_dict
 
 def convert_to_ds(data, labels):
@@ -90,6 +88,12 @@ def convert_to_ds(data, labels):
         # need get distance
         data.distance = data.find_distance()
     return s1
+
+def convert_row_series(result, df):
+    # converts a data series into a data frame and joins to existing df
+    dseries = convert_status_to_ds(result)
+    merged_df = pd.merge(dseries.to_frame().T, df, how="cross")
+    return merged_df
 
 def convert_status_to_ds(data):
     """
@@ -179,8 +183,12 @@ def extract_spectrum(data):
     Returns:
         2 arrays for flux and energy
     """
-    energy = data.energy_bin
-    flux = data.flux_bin
+    if data.energy_type == "high":
+        energy = data.high_energy_bin
+        flux = data.high_flux_bin
+    else:
+        energy = data.low_energy_bin
+        flux = data.low_flux_bin
     return energy, flux
 
 def peaks_finder(data):
@@ -209,7 +217,7 @@ def convert_date_to_string(dt):
     Returns:
         str
     """
-    return str(np.datetime_as_string(dt))#
+    return str(np.datetime_as_string(dt))
 
 
 def get_current_info(data, current_df):
@@ -275,24 +283,6 @@ def find_abs_error(dataframe, un_col_name, col_name):
     dataframe["abs_error"] = dataframe[col_name] * (dataframe[un_col_name] / 100)
     return dataframe
 
-#old function
-def find_spect_peaks(data):
-    """
-    find the peaks for every data
-    Args:
-        data (list): _description_
-
-    Returns:
-        2 lists:
-    """
-    energy_list = []
-    flux_list = []
-    for spectra in data:
-        energy, flux = peaks_finder(spectra)
-        energy_list.append(energy)
-        flux_list.append(flux)
-    return energy_list, flux_list
-
 def filter_shutter_status(data, selected_shutter="all"):
     """
     for each result get a df
@@ -303,8 +293,6 @@ def filter_shutter_status(data, selected_shutter="all"):
         new_df = []
         if result.out_data.empty:
             continue
-        #remove low current
-        #result = filter_low_beam_current(result, 25)
         #remove epb measurements with no shutter status
         # check has a valid shutter
         if "shutter-open" not in result.out_data.columns:
@@ -329,7 +317,7 @@ def filter_shutter_status(data, selected_shutter="all"):
         new_df.append(combined_row)
         if selected_shutter == "closest":
             combined_df = pd.concat(new_df).set_index("key")
-            new_df = drop_shutters(neighbours, combined_df)
+            new_df = check_multiple_shutters(neighbours, combined_df)
         else:
             new_df = pd.concat(new_df).set_index("key")
         filtered_list.append(new_df)
@@ -350,7 +338,7 @@ def last_row_shutter_change(result, shutter_name):
     data = data[(result.out_data["t(s)"] > 1000)]
     #get df of data when shutter changes
     try:
-        change_times = shutter_change(data[shutter_name], data)
+        change_times = shutter_change(data, shutter_name)
     except KeyError:
         change_times = None
     if change_times is None:
@@ -361,11 +349,10 @@ def last_row_shutter_change(result, shutter_name):
     merged_df = convert_row_series(result, change_times)
     return merged_df
 
-def drop_shutters(names, df):
+def check_multiple_shutters(names, df):
+    # this function creates a bool based on multiple name conditions
+    # function returns true if all are true but false if all are false and nan if neither
     shutter_keep = df.loc[:, names]
-    #own_df = df.loc[:, "shutter-open"]
-    #df["truth"] = np.where((~shutter_keep.any(axis=1)) & (own_df == True), True, False)
-    #df["truth"] = np.where(((shutter_keep.all(axis=1)) & (own_df == False)), True, False)
     df["truth"] = np.where(shutter_keep.all(axis=1), True, np.where((~shutter_keep).all(axis=1), False, np.nan))
     return df
 
@@ -379,18 +366,18 @@ def flag_shutter(data, shutter, flag=True):
     averaged_data = average_repeated_data(data).dropna(subset = ['x', 'y', 'norm_dose']).reset_index()
     return averaged_data
 
-def average_repeated_data(df, shutter):
+def average_repeated_data(df):
     """
     When measurement has multiple data for same date and location take average of data
     Args:
         df (dataframe): key information for data in df
     returns: filtered df with averages taken for repeats
     """
-    #keep = df[[ "reference", "start", "end", "shutter-open"]].drop_duplicates()
+    keep = df[[ "reference", "start", "end", "shutter-open"]].groupby(df.index).first()
     df = df.infer_objects()
-    filtered_df = df.groupby(["key", shutter]).mean(numeric_only=True).reset_index()
-    #averaged_df = pd.merge(filtered_df, keep, on="")
-    return filtered_df
+    filtered_df = df.groupby(["key"]).mean(numeric_only=True)
+    averaged_df = pd.concat([filtered_df, keep], axis=1)
+    return averaged_df
 
 def filter_low_beam_current(data, minimum_current):
     """
@@ -405,76 +392,14 @@ def filter_low_beam_current(data, minimum_current):
     data.out_data= data.out_data[data.out_data["ts2_current"] > minimum_current]
     return data
 
-#Todo - add comparison between repeats of data  and return the key(same x,y,z)
 def find_repeats(data):
-    #check likewise data
     ref = list(set(data["reference"].values))
-    filtered_df_dic = {}
+    filtered_dict = {}
     for text in ref:
-        groups = text.split('-')
-        joined_str = '-'.join(groups[:2]), '-'.join(groups[2:])
+        joined_str = split_reference(text)
         if joined_str[1] != '':
-            filtered_df_dic[joined_str[0]] = (data[data["reference"].str.match(joined_str[0])]).drop_duplicates()
-    return filtered_df_dic
-
-def group_repeated_results(data):
-    keys = find_repeats(data)
-    return keys
-
-def get_x_y_z(data1, data2):
-    open_plot_df = data1[['x', 'y',"norm_dose", "abs_error", 'Ther%', "Epit%", "Fast%"]]
-    closed_plot_df = data2[['x', 'y',"norm_dose", "abs_error", 'Ther%', "Epit%", "Fast%"]]
-    shutter_dict = {"open": open_plot_df, "closed": closed_plot_df}
-    x = [shutter_dict["open"]['x'], shutter_dict["closed"]['x']]
-    y = [shutter_dict["open"]['y'], shutter_dict["closed"]['y']]
-    #look at dose vs abs error
-    z = [shutter_dict["open"]['norm_dose'], shutter_dict["closed"]['norm_dose']]
-    return x, y, z
-
-def get_out_from_name(data):
-    return
-
-def check_updated_shutter_info(shutters, beam_df):
-    # add check to load new data
-    date = get_date_df(shutters, "ts2_current", "_time")
-    if date.date() < datetime.today().date():
-        print("Updating shutter information \n")
-        shutters = append_new_shutter_info(shutters, beam_df)
-        #saves new shutter information into pickle for later use
-        save_pickle(shutters, "shutter_data")
-        print("saved new data and loaded into program \n")
-    return shutters
-
-def get_date_df(df, channel_name, colname):
-    """This function extracts in a series of datetime the last date
-    Args:
-        df (pandas dataframe): df contianing time series column
-        channel_name: str name of beamline shuttter/current
-        colname: str of name of column
-    Returns:
-        datetime
-    """
-    time = df[channel_name].index
-    last_time = time.max()
-    return last_time
-
-def append_new_shutter_info(shutters, beam_df):
-    new = latest_shutters(shutters, beam_df)
-    result = {}
-    for key, df in new.items():
-        if key in shutters.keys():
-            result[key] = pd.concat([shutters[key], df])
-        else:
-            result[key] = df
-    return result
-
-def latest_shutters(current_shutter, beam_df):
-    last_time = get_date_df(current_shutter,"ts2_current", "_time")
-    last_time = last_time.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-    today = idb.date_to_str(datetime.today())
-    dates = [last_time, today]
-    shutters = influx_db_query(dates, beam_df.channel_name)
-    return shutters
+            filtered_dict[joined_str[0]] = (data[data["reference"].str.match(joined_str[0])]).drop_duplicates()
+    return filtered_dict
 
 def localise_tz(data, timezone):
     # ensure non datetime entries are valid
@@ -509,42 +434,57 @@ def filter_shutter_closed(df, shutter_names):
     filtered_df = df[ (~(df[shutter_names]).any(axis=1)) & ~(df[shutter_names[0]].isna())]
     return filtered_df
 
-def select_shutter(self, selected_shutter):
-    if self.name == "no_beamline":
-        names = None
-    elif selected_shutter == "all":
-        names = self.all_neighbours.index
-    elif selected_shutter == "closest":
-        names = self.closest_neighbours.index
-        names = np.append(names, self.name)
-    elif selected_shutter == "own":
-        #selected just the own
-        names = self.name
-    elif selected_shutter == "none":
-        names = None
-    return names
+def shutter_change(df: pd.DataFrame, shutter : str):
+    """
+    finds row in df when shutter parameter changes and outputs all rows which match
+    Args:
+        df (pd.DataFrame): 
+        shutter (str): 
 
-def convert_row_series(result, df):
-    dseries = convert_status_to_ds(result)
-    merged_df = pd.merge(dseries.to_frame().T, df, how="cross")
-    return merged_df
-
-
-def shutter_change(df, result):
-    filter = (df.ne(df.shift(1)))
-    change_times = result[filter].iloc[1:]
+    Returns:
+        change_times (pd.DataFrame): df of rows with change in shutter
+    """
+    filter = (df[shutter].ne(df[shutter].shift(-1)))
+    change_times = df[filter].iloc[:-1]
     if change_times.empty:
         return None
     else:
         return change_times
 
+def select_shutters(data : diamon, selected_shutters : str = "all", shutters : list[str]=None):
+    """
+    This function selects the beamlines according to chosen parameter
+    Args:
+        data (diamon):  diamon class instance
+        selected_shutters (str): option of shuter
+        shutters : list[str] : selected shutters to look at
+    Returns:
+        3 possible outcomes - "all" - every beamlline on that side is selected, 
+                              "closest" - closest neighbours
+                              " custom" - own selection
+        
+    """
+    if selected_shutters == "all":
+        names = data.beamlines.all_neighbours.index.to_numpy()
+        sel_names = [name for name in names if name in data.out_data.columns]
+    elif selected_shutters == "closest":
+        names = data.beamlines.closest_neighbours.index
+        # add own shutter
+        names = np.append(names, data.beamlines.name)
+        sel_names = [name for name in names if name in data.out_data.columns]
+    elif selected_shutters == "custom":
+        # check the selected shutter is valid
+        sel_names = [shutter for shutter in shutters if shutter in data.beamlines.all_neighbours.index]
+    return sel_names
+
 def split_reference(text):
+    #splits reference to location key separated by two hyphens
     groups = text.split('-')
     joined_str = '-'.join(groups[:2]), '-'.join(groups[2:])
     return joined_str
 
 def find_repeats(df, data):
-    #check likewise data
+    #check for data with matching keys aka a repeat measurement and return all repeats
     ref = list(set(df["reference"].values))
     filtered_df_dic = defaultdict(dict)
     keys = []
@@ -561,6 +501,7 @@ def find_repeats(df, data):
     return filtered_df_dic
 
 def summary_df(df : pd.DataFrame, columns : list, save="", duplicates=True):
+    # store a summary df of information to csv file
     df["real_time"] = pd.to_datetime(df["start"]).add(pd.to_timedelta(df["t(s)"], unit="s"))
     summary_df = df[columns]
     if duplicates == False:
@@ -576,8 +517,14 @@ def split_df_axis(df, selected_z):
     df.loc[:,"z"] = df.loc[:, selected_z]
     pos_df = df[df["y"] > 0][["x", "y", "z"]]
     neg_df = df[df["y"] < 0][["x", "y", "z"]]
-    
-    return [pos_df, neg_df]
+    if pos_df.empty:
+        return [neg_df]
+    elif neg_df.empty:
+        return [pos_df]
+    elif pos_df.empty and neg_df.empty:
+        raise Exception("empty df - check your df")
+    else:
+        return [pos_df, neg_df]
 
 def compare_df(df, labels, status=[True, False], shutters=None):
     """
@@ -591,3 +538,95 @@ def compare_df(df, labels, status=[True, False], shutters=None):
         df2 = flag_shutter(df, shutters[1], status[1])
     df_dict = {labels[0]: df1, labels[1]: df2}
     return df_dict
+
+def filter_reference_location(diamon_dict : dict[classmethod], condition : str, 
+                              match_case : bool=False):
+    """matches the reference key of a measurement to condition
+    optional arg to set to exact or contains key
+
+    Args:
+        diamon_obj (dict[diamon]): diamon class instance in dictionary
+        condition (str): string conditon eg: "2Im"
+        match_case (str) optional : match exact ref or if contains ref in key
+    """
+    filtered_dict = {}
+    for key, result in diamon_dict.items():
+        if match_case == True:
+            if result.reference["Measurement Reference"].iloc[0] == condition:
+                filtered_dict[key] = result
+        else:
+            if condition in result.reference["Measurement Reference"].iloc[0]:
+                filtered_dict[key] = result
+    return filtered_dict
+
+def split_df_by_key(df : pd.DataFrame, key_list : list):
+    """_summary_
+
+    Args:
+        df (pd.DataFrame): _description_
+        keys (list): _description_
+    """
+    key_dict = {key : df[df["reference"].str.contains(key)] for key in key_list}
+    return key_dict
+
+def get_energy_counts(rate_df, energy="thermal"):
+    # return df of energy dependent counts depending on selection of either
+    # thermal, epithermal or fast neutrons
+    if energy == "thermal":
+        df = rate_df[["rt(s)", "Det1", "Det2"]]
+        df.loc[~(df==0).any(axis=1)]
+        return df
+    elif energy == "epithermal":
+        df = rate_df[["rt(s)","Det3", "Det4"]]
+        df.loc[~(df==0).any(axis=1)]
+        return df
+    elif energy == "fast":
+        df = rate_df[["rt(s)","Det5", "Det6"]]
+        df.loc[~(df==0).any(axis=1)]
+        return df
+
+def select_data_coordinate_range(data : dict[diamon], xmin : float, xmax : float, ymin : float, ymax : float):
+    """selects data that fit into rectangular coordinate box
+
+    Args:
+        data (dict[diamon]): dictionary of diamon measurements
+        xmin (float): minimum x coordinate
+        xmax (float): maximum x coordinate
+        ymin (float): minimum y coordinate
+        ymax (float): maximum y coordinate
+
+    Returns:
+        dict: diamon dict inside valid coord
+    """
+    filtered_dict = {}
+    for result in data.values():
+        if (result.x > xmin) & (result.x < xmax) & (result.y > ymin) & (result.y < ymax):
+            filtered_dict[result.file_name] = result
+    return filtered_dict
+
+def normalise_dose(data):
+    """
+    normalise dose measurement to the current of beam
+    Args:
+        data (obj): diamon class
+
+    Returns:
+        data: diamon class object with normalised dose for each time
+    """
+    if data.beamlines.target_station == "1":
+        try:
+            data.out_data["norm_dose"] = (140 * data.out_data["H*(10)r"].divide(data.out_data[data.beamlines.current_info]))
+        except ZeroDivisionError:
+            data.out_data["norm_dose"] = data.out_data["H*(10)r"]
+        condition = (~np.isfinite(data.out_data["norm_dose"])) |(data.out_data["ts1_current"] < 120)
+        data.out_data["norm_dose"] = np.where((condition) , data.out_data["H*(10)r"], data.out_data["norm_dose"])
+    elif data.beamlines.target_station == "2":
+        try:
+            data.out_data["norm_dose"] = (35 * data.out_data["H*(10)r"].divide(data.out_data[data.beamlines.current_info]))
+        except ZeroDivisionError:
+            data.out_data["norm_dose"] = data.out_data["H*(10)r"]
+        condition = (~np.isfinite(data.out_data["norm_dose"])) |(data.out_data["ts2_current"] < 25)
+        data.out_data["norm_dose"] = np.where((condition) , data.out_data["H*(10)r"], data.out_data["norm_dose"])
+
+    data.norm_dose = data.out_data["norm_dose"].tail(1)
+    return data
