@@ -29,6 +29,7 @@ Set of functions to aid with analysis.
 - convert series to df
 - filter location
 - repeat data
+Key function: filter_shutter_analysis - must be ran to produce a df of all data
 
 ### diamon_read_data.py
 
@@ -40,7 +41,7 @@ Creates a query api to fetch data from the InfluxDB from accel controls at ISIS.
 Query can be called using two dates or a beam cycle from ISIS.
 
 ### main.py
-
+Main program. Loads diamon and shutter data into a dictionary. Must use to do further analysis.
 ### meny.py
 -UNFINISHED-
 additional feature to interactively run program from command line
