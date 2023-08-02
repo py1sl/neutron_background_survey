@@ -1,6 +1,5 @@
 import src.diamon_analysis as da
 import src.influx_data_query as idb
-import src.shutter_analysis as sa
 import src.neutronics_analysis as na
 from datetime import datetime
 import pandas as pd
@@ -18,19 +17,19 @@ def load_channel_data(start : str, end : str, channel_names : list[str]):
 
     try:
         old_channel_data = na.load_pickle("shutter_data")
-        channel_data = check_updated_shutter_info(old_channel_data, channel_names)
+        channel_data = check_updated_shutter_info(old_channel_data, channel_names, end)
         
     except FileNotFoundError:
         print("No existing channel data saved")
         # will read in all information
         channel_data = idb.query_object.get_data_datetime(start=start, end=end, channels=channel_names)
-        channel_data = sa.channel_names(channel_data)
+    channel_data = get_channel_names(channel_data)
     return channel_data
 
-def check_updated_shutter_info(shutters, channel_names):
+def check_updated_shutter_info(shutters, channel_names, end):
     # add check to load new data
-    date = get_date_df(shutters, "ts2_current")
-    if date.date() < datetime.today().date():
+    date = get_date_df(shutters, "local::beam:target")
+    if date.date() < end:
         print("Updating shutter information \n")
         shutters = append_new_shutter_info(shutters, channel_names)
         #saves new shutter information into pickle for later use
@@ -65,7 +64,7 @@ def append_new_shutter_info(shutters, channel_names):
 
 def latest_shutters(current_shutter, channel_names):
     #obtain newest shutter information
-    last_time = get_date_df(current_shutter,"ts2_current")
+    last_time = get_date_df(current_shutter,"local::beam:target")
     last_time = last_time.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
     today = idb.date_to_str(datetime.today(), "Europe/London")
     shutters = idb.query_object.get_data_datetime(last_time, today, channel_names)
@@ -84,7 +83,7 @@ def filter_shutters(data, shutter_data):
     """
     #get beamline and building names for data being measured
     beamlines = data.beamlines.influx_data
-    print(data.beamlines)
+    print("Filtering data located on " + data.beamlines.name + ", for reference " + data.file_name)
     shutter_list = {name: df for name, df in shutter_data.items() if name in beamlines}
     times = np.array(data.out_data["datetime"])
     # if on the epb no shutter info - not near a beamline only get current
@@ -126,7 +125,7 @@ def set_shutter_bool(status, name):
     else:
         return False
 
-def channel_names(shutter_data):
+def get_channel_names(shutter_data):
     #ts1 contains overllaping shutter for different beamlines so need map to correct names
     names_df = pd.read_csv("data/target_station_data.csv", index_col=["Name"])
     data = {}
