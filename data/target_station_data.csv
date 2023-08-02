@@ -11,6 +11,7 @@ TS1,north,9,Ts,tosca,TRUE,t1shut::n8_overview:sta
 TS1,north,10,Is,ines,TRUE,t1shut::n8_overview:sta
 TS1,north,11,Em,emma,TRUE,t1shut::n9_overview:sta
 TS1,north,12,Mn,muon_n,FALSE,local::muon_kicker:status
+TS1,north,#N/A,Bn,beamline_north,#N/A,#N/A
 TS1,south,1,Ms,muon_s,FALSE,local::muon_kicker:status
 TS1,south,4,Pe,pearl,TRUE,t1shut::s9_overview:sta
 TS1,south,5,Hr,hrpd,TRUE,t1shut::s8_overview:sta
@@ -21,10 +22,12 @@ TS1,south,9,Me,merlin,TRUE,t1shut::s4_overview:sta
 TS1,south,10,Sx,sxd,TRUE,t1shut::s3_overview:sta
 TS1,south,11,Vs,vesuvio,TRUE,t1shut::s2_overview:sta
 TS1,south,12,Mp,maps,TRUE,t1shut::s1_overview:sta
+TS1,south,#N/A,Bs,beamline_south,#N/A,#N/A
 TS2,West,1,Ch,chipir,TRUE,t2shut::chipir:status
 TS2,West,2,Im,imat,TRUE,t2shut::w5:status
 TS2,West,3,Le,let,TRUE,t2shut::let:status
 TS2,West,4,Ni,nimrod,TRUE,t2shut::nimrod:status
+TS2,West,#N/A,Bw,beamline_west,#N/A,#N/A
 TS2,East,1,Wh,wish,TRUE,t2shut::wish:status
 TS2,East,2,La,larmor,TRUE,t2shut::e6:status
 TS2,East,3,Of,offspec,TRUE,t2shut::offspec:status
@@ -32,3 +35,4 @@ TS2,East,4,In,inter,TRUE,t2shut::inter:status
 TS2,East,5,Po,polref,TRUE,t2shut::polref:status
 TS2,East,6,Sd,sans2d,TRUE,t2shut::sans2d:status
 TS2,East,7,Zo,zoom,TRUE,t2shut::e1:status
+TS2,East,#N/A,Be,beamline_east,#N/A,#N/A
