@@ -614,11 +614,17 @@ def normalise_dose(data):
         data: diamon class object with normalised dose for each time
     """
     if data.beamlines.target_station == "1":
-        data.out_data["norm_dose"] = (140 * data.out_data["H*(10)r"].divide(data.out_data[data.beamlines.current_info]))
+        try:
+            data.out_data["norm_dose"] = (140 * data.out_data["H*(10)r"].divide(data.out_data[data.beamlines.current_info]))
+        except ZeroDivisionError:
+            data.out_data["norm_dose"] = data.out_data["H*(10)r"]
         condition = (~np.isfinite(data.out_data["norm_dose"])) |(data.out_data["ts1_current"] < 120)
         data.out_data["norm_dose"] = np.where((condition) , data.out_data["H*(10)r"], data.out_data["norm_dose"])
     elif data.beamlines.target_station == "2":
-        data.out_data["norm_dose"] = (35 * data.out_data["H*(10)r"].divide(data.out_data[data.beamlines.current_info]))
+        try:
+            data.out_data["norm_dose"] = (35 * data.out_data["H*(10)r"].divide(data.out_data[data.beamlines.current_info]))
+        except ZeroDivisionError:
+            data.out_data["norm_dose"] = data.out_data["H*(10)r"]
         condition = (~np.isfinite(data.out_data["norm_dose"])) |(data.out_data["ts2_current"] < 25)
         data.out_data["norm_dose"] = np.where((condition) , data.out_data["H*(10)r"], data.out_data["norm_dose"])
 
