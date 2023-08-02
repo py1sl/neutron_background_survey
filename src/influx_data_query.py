@@ -152,13 +152,13 @@ class query_object():
         df = influx_querier.query_influx(influx_querier.client_query_api, channel_name=channel, 
                                         start_time=start, end_time=end)
         if df.empty:
-            end = str_to_date(start)
+            end = str_to_date(start, "Europe/London")
             prev_day = (end - datetime.timedelta(days=1))
-            start = date_to_str(prev_day)
+            start = date_to_str(prev_day, "Europe/London")
             df = self._query_db(influx_querier, channel, start, self.start).tail(1)
         else:
-            filtered_df = self.remove_empty_col(df).set_index("_time")
-        return filtered_df
+            df = self.remove_empty_col(df).set_index("_time")
+        return df
 
     @staticmethod
     def remove_empty_col(df):
@@ -267,6 +267,8 @@ def str_to_date(str_date: str, source_timezone, target_timezone="UTC"):
     Returns:
         date (datetime): datetime object in self.timezone
     """
+    source_timezone = pytz.timezone(source_timezone)
+    target_timezone = pytz.timezone(target_timezone)
     localiser = DatetimeLocaliser(source_timezone, target_timezone)
     date = localiser.convert_string_to_datetime(str_date)
     return date
