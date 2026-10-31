@@ -9,6 +9,17 @@ with coordinates and a beamname attached to it. The reference csv is found in 'd
 
 Existing data can either be loaded manually by loading the folder and channel information can be extracted by pulling using the influx query tool from the InfluxDB. To save time there is the option to pickle existing data.
 
+## Installation
+
+Requires Python 3.9+. From the repository root:
+
+```
+pip install .          # runtime dependencies
+pip install -e ".[dev]"  # plus pytest, pytest-cov and flake8
+```
+
+The `influx_data_utils` package (ISIS internal) is needed for InfluxDB queries and is not installed automatically.
+
 Flow:
 Run through src/main.py.
 1. Load diamon data from 'data\measurements' folder.
