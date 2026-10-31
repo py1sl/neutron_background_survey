@@ -9,6 +9,7 @@ import pandas as pd
 import src.diamon as diamon
 import src.diamon_read_data as diamon_read_data
 import src.main as main
+import src.shutter_analysis as shutter_analysis
 
 
 class IncrementalLoadingTests(unittest.TestCase):
@@ -59,14 +60,42 @@ class MainCacheTests(unittest.TestCase):
             patch.object(main.drd, "get_earliest_entry", return_value=None),
             patch.object(main.drd, "get_last_entry", return_value=None),
             patch.object(main.pd, "read_csv", return_value=pd.DataFrame({"channel_name": ["channel"]})),
-            patch.object(main.sa, "load_channel_data", return_value=channel_data),
+            patch.object(main.sa, "load_channel_data", return_value=channel_data) as load_channel_data,
             patch.object(main.sa, "filter_shutters", side_effect=lambda result, _: result),
             patch.object(main.da, "save_pickle", side_effect=lambda data, name: saved.update({name: data})),
         ):
             main.main(save=True)
 
         self.assertIs(saved["diamon_data"], measurements)
-        self.assertIs(saved["shutter_data"], channel_data)
+        self.assertEqual(load_channel_data.call_args.kwargs["save"], True)
+
+    def test_channel_cache_stores_raw_channel_names(self):
+        raw_data = {"local::beam:target": pd.DataFrame()}
+        mapped_data = {"ts1_current": pd.DataFrame()}
+        saved = {}
+
+        with (
+            patch.object(shutter_analysis.na, "load_pickle", side_effect=FileNotFoundError),
+            patch.object(
+                shutter_analysis.idb.query_object,
+                "get_data_datetime",
+                return_value=SimpleNamespace(filtered_df=raw_data),
+            ),
+            patch.object(
+                shutter_analysis,
+                "get_channel_names",
+                return_value=mapped_data,
+            ),
+            patch.object(
+                shutter_analysis.na,
+                "save_pickle",
+                side_effect=lambda data, name: saved.update({name: data}),
+            ),
+        ):
+            result = shutter_analysis.load_channel_data(None, None, [], save=True)
+
+        self.assertIs(result, mapped_data)
+        self.assertIs(saved["shutter_data"], raw_data)
 
 
 class LongFormatFileTests(unittest.TestCase):
