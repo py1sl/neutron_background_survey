@@ -26,7 +26,7 @@ def main(save=False):
     # save
     if save == True:
         da.save_pickle(main_data, "diamon_data")
-        da.save_pickle(main_data, "shutter_data")
+        da.save_pickle(channel_data, "shutter_data")
     return main_data
 
 def shutter_df(data, selected_shutter, bb):

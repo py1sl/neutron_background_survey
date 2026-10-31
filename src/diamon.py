@@ -18,7 +18,7 @@ class diamon:
     of the object. Requires a path to diamon measurement folder and location spreadsheet to match id and 
     date to a coordinate system.
     """
-    def __init__(self, folder_path=""):
+    def __init__(self, folder_path="", summary=False):
         self.out_data : pd.DataFrame
         self.rate_data : pd.DataFrame
         self.datetime : datetime
@@ -34,6 +34,7 @@ class diamon:
         self.end_time = None
         self.id = None
         self.current_data = []
+        self.summary = summary
         if folder_path != "":
             self.read_folder(folder_path)
             self.folder_name = folder_path.split("\\")[-1]
@@ -136,6 +137,14 @@ class diamon:
                 self.read_unfold_file(file)
             elif "counters" in file:
                 self.read_counters(file)
+            elif "LONG_OUT" in file:
+                if self.summary:
+                    # long out data gives the dose and %energy neutrons as func of time in set time intervals
+                    self.summary_out = read_data_file(file, 0, 3)
+            elif "LONG_rate" in file:
+                if self.summary:
+                    # long rate data gives all counts as func of time for each detector in set time intervals
+                    self.summary_rate = read_data_file(file, 0, 1)
             elif "OUT_data" in file:
                 self.out_data = read_data_file(file, 0, 3)
                 self.out_data = self.out_data.drop(columns="INTERNAL")
@@ -144,12 +153,6 @@ class diamon:
                     self.start_time)
             elif "rate" in file:
                 self.rate_data = read_data_file(file, 0, 1)
-            elif "LONG_OUT" in file and self.summary == True:
-                # long out data gives the dose and %energy neutrons as func of time in set time intervals 
-                self.summary_out = read_data_file(file, 0, 3)
-            elif "LONG_rate" in file and self.summary == True:
-                # long rate data gives all counts as func of time for each detector in set time intervals
-                self.summary_rate = read_data_file(file, 0, 1)
             else:
                 raise Exception("Error: Unknown file in directory: " + str(folder))
 
