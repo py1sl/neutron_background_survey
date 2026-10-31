@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neutron_background_survey"
+version = "0.1.0"
+description = "Background neutron survey analysis for ISIS"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy",
+    "pandas",
+    "scipy",
+    "matplotlib",
+    "dask[dataframe]",
+    "dill",
+    "influxdb-client",
+    "pytz",
+    "plyfile",
+    "open3d",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov", "flake8"]
+
+[tool.setuptools]
+py-modules = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "src"]
