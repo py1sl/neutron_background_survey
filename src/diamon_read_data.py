@@ -93,7 +93,7 @@ def load_diamon(loc_data : pd.DataFrame, data_path : str = diamon_path):
         dictionary of diamon class objects
     """
     folders = glob.glob(data_path) if isinstance(data_path, str) else data_path
-    diamon_list = [diamon.diamon(folder) for folder in folders]
+    diamon_list = [diamon.diamon(str(folder)) for folder in folders]
     # match the location from the file name ref to coord to get shutter info
     diamon_list = match_id_location(loc_data, diamon_list)
     diamon_dict =  {data.file_name: data for data in diamon_list}

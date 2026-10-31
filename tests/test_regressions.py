@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 import pandas as pd
 
@@ -28,7 +28,7 @@ class IncrementalLoadingTests(unittest.TestCase):
 
         self.assertIs(result, existing_data)
         self.assertEqual(set(result), {"old", "new"})
-        load_diamon.assert_called_once_with(unittest.mock.ANY, folders)
+        load_diamon.assert_called_once_with(ANY, folders)
 
     def test_load_diamon_accepts_explicit_folder_list(self):
         folders = ["measurement-one", "measurement-two"]
