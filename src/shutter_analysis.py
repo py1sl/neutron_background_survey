@@ -5,7 +5,7 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 
-def load_channel_data(start : str, end : str, channel_names : list[str]):
+def load_channel_data(start : str, end : str, channel_names : list[str], save=False):
     """
     loads channel data from already saved pickle file/influxDB
     Args:
@@ -22,7 +22,11 @@ def load_channel_data(start : str, end : str, channel_names : list[str]):
     except FileNotFoundError:
         print("No existing channel data saved")
         # will read in all information
-        channel_data = idb.query_object.get_data_datetime(start=start, end=end, channels=channel_names)
+        channel_data = idb.query_object.get_data_datetime(
+            start=start, end=end, channels=channel_names
+        ).filtered_df
+    if save:
+        na.save_pickle(channel_data, "shutter_data")
     channel_data = get_channel_names(channel_data)
     return channel_data
 
