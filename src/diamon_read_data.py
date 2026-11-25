@@ -49,9 +49,9 @@ def update_diamon_data(existing_data, loc_data):
         print("No new data - loading existing file")
         return existing_data
     else:
-         new_dic = load_diamon(loc_data, unread_paths)
-         existing_data.update(new_dic)
-         return new_dic
+        new_dic = load_diamon(loc_data, unread_paths)
+        existing_data.update(new_dic)
+        return existing_data
 
 def get_last_entry(data):
     # in exisitng group for diamon results get most recent entry
@@ -92,7 +92,8 @@ def load_diamon(loc_data : pd.DataFrame, data_path : str = diamon_path):
     Returns:
         dictionary of diamon class objects
     """
-    diamon_list = [diamon.diamon(folder) for folder in glob.glob(data_path)]
+    folders = glob.glob(data_path) if isinstance(data_path, str) else data_path
+    diamon_list = [diamon.diamon(str(folder)) for folder in folders]
     # match the location from the file name ref to coord to get shutter info
     diamon_list = match_id_location(loc_data, diamon_list)
     diamon_dict =  {data.file_name: data for data in diamon_list}
